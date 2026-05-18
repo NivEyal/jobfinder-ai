@@ -1,0 +1,94 @@
+resume_metadata:
+  template: israeli_resume
+  default_language: he
+  supported_languages:
+    - he
+    - en
+  rtl_languages:
+    - he
+
+personal_information:
+  first_name: "שם פרטי"
+  last_name: "שם משפחה"
+  email: "candidate@example.com"
+  phone: "+972-50-123-4567"
+  city: "תל אביב"
+  country: Israel
+  github: "https://github.com/your-user"
+  portfolio: "https://your-portfolio.example.com"
+  linkedin: ""
+
+versions:
+  he:
+    direction: rtl
+    headline: "כלכלן/ית מתחיל/ה | אנליסט/ית נתונים פיננסיים"
+    summary: "בוגר/ת כלכלה עם יכולת אנליטית גבוהה, שליטה באקסל, עבודה מסודרת עם נתונים ורצון להשתלב בתפקיד ראשון בעולם הפיננסים והבקרה."
+    skills:
+      - Excel
+      - PowerPoint
+      - ניתוח נתונים
+      - בקרה תקציבית
+      - דוחות כספיים
+      - עברית
+      - אנגלית
+    education_details:
+      - degree: "תואר ראשון בכלכלה"
+        institution: "שם המוסד האקדמי"
+        location: "ישראל"
+        years: "2022-2025"
+        notes: "קורסים רלוונטיים: מימון, סטטיסטיקה, אקונומטריקה, חשבונאות."
+    experience_details:
+      - position: "ניסיון רלוונטי / פרויקט אקדמי"
+        company: "שם הארגון או המוסד"
+        location: "ישראל"
+        years: "2025"
+        bullets:
+          - "ניתוח נתונים פיננסיים והפקת תובנות."
+          - "בניית קבצי Excel כולל נוסחאות, Pivot וטבלאות סיכום."
+          - "הצגת ממצאים בצורה ברורה ומעשית."
+    projects:
+      - name: "מודל ניתוח תקציבי"
+        description: "בניית גיליון ניתוח תקציב מול ביצוע והסקת פערים מרכזיים."
+        link: ""
+    languages:
+      - language: "עברית"
+        proficiency: "שפת אם"
+      - language: "אנגלית"
+        proficiency: "טובה מאוד"
+
+  en:
+    direction: ltr
+    headline: "Entry-Level Economist | Financial Data Analyst"
+    summary: "Economics graduate with strong analytical skills, advanced Excel foundations, structured data work habits, and motivation to start a finance, FP&A, or budget-control role."
+    skills:
+      - Excel
+      - PowerPoint
+      - Financial analysis
+      - Budget control
+      - Reporting
+      - Hebrew
+      - English
+    education_details:
+      - degree: "B.A. in Economics"
+        institution: "Academic Institution"
+        location: "Israel"
+        years: "2022-2025"
+        notes: "Relevant coursework: finance, statistics, econometrics, accounting."
+    experience_details:
+      - position: "Relevant Experience / Academic Project"
+        company: "Organization or Institution"
+        location: "Israel"
+        years: "2025"
+        bullets:
+          - "Analyzed financial data and produced practical insights."
+          - "Built Excel workbooks with formulas, PivotTables, and summary tables."
+          - "Presented findings clearly to support decision-making."
+    projects:
+      - name: "Budget Analysis Model"
+        description: "Built a budget-vs-actual analysis sheet and identified key variances."
+        link: ""
+    languages:
+      - language: "Hebrew"
+        proficiency: "Native"
+      - language: "English"
+        proficiency: "Very good"
