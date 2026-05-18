@@ -1,13 +1,25 @@
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List
 
 from src.israel_sources.base import SearchQuery
 from src.israel_sources.models import IsraeliJob
 from src.israel_sources.registry import get_adapter, get_all_adapters
 
 
+ProgressCallback = Callable[[Dict[str, Any]], None]
+CancelCallback = Callable[[], bool]
+
+
 class IsraelSearchEngine:
-    def __init__(self, sources: Iterable[str] | None = None, max_pages: int | None = None):
+    def __init__(
+        self,
+        sources: Iterable[str] | None = None,
+        max_pages: int | None = None,
+        progress_callback: ProgressCallback | None = None,
+        cancel_callback: CancelCallback | None = None,
+    ):
         self.adapters = [get_adapter(source) for source in sources] if sources else get_all_adapters()
+        self.progress_callback = progress_callback
+        self.cancel_callback = cancel_callback
         if max_pages is not None:
             for adapter in self.adapters:
                 adapter.max_pages = max_pages
@@ -29,22 +41,69 @@ class IsraelSearchEngine:
         jobs_per_source = search_plan.get("jobs_per_source", 25)
         jobs: List[IsraeliJob] = []
         seen = set()
+        queries = search_plan.get("queries", [])
+        total_steps = max(1, len(queries) * max(1, len(self.adapters)))
+        step = 0
 
-        for query_spec in search_plan.get("queries", []):
-            query_jobs = self.search(
+        for query_spec in queries:
+            if self.cancel_requested():
+                self.emit_progress(search_plan, step, total_steps, len(jobs), "", "cancelled")
+                return jobs
+            query = SearchQuery(
                 keywords=query_spec.get("keywords", []),
                 locations=query_spec.get("locations", []),
                 limit=min(query_spec.get("limit", jobs_per_source), total_limit),
             )
-            for job in query_jobs:
-                key = (job.source, job.source_job_id)
-                if key in seen:
+            for adapter in self.adapters:
+                if self.cancel_requested():
+                    self.emit_progress(search_plan, step, total_steps, len(jobs), adapter.source, "cancelled")
+                    return jobs
+                step += 1
+                try:
+                    query_jobs = adapter.search(query)
+                except Exception as exc:
+                    self.emit_progress(search_plan, step, total_steps, len(jobs), adapter.source, f"error: {exc}")
                     continue
-                seen.add(key)
-                jobs.append(job)
+                for job in query_jobs:
+                    key = (job.source, job.source_job_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    jobs.append(job)
+                    if len(jobs) >= total_limit:
+                        self.emit_progress(search_plan, step, total_steps, len(jobs), adapter.source, "complete")
+                        return jobs
+                self.emit_progress(search_plan, step, total_steps, len(jobs), adapter.source, "searching")
                 if len(jobs) >= total_limit:
                     return jobs
         return jobs
 
     def source_names(self) -> List[str]:
         return [adapter.source for adapter in self.adapters]
+
+    def emit_progress(
+        self,
+        search_plan: Dict[str, Any],
+        step: int,
+        total_steps: int,
+        found: int,
+        source: str,
+        status: str,
+    ) -> None:
+        if not self.progress_callback:
+            return
+        self.progress_callback(
+            {
+                "phase": "searching",
+                "status": status,
+                "source": source,
+                "jobs_found_so_far": found,
+                "target_jobs": search_plan.get("total_limit", 100),
+                "step": step,
+                "total_steps": total_steps,
+                "percent": int(min(99, max(1, step / max(total_steps, 1) * 100))),
+            }
+        )
+
+    def cancel_requested(self) -> bool:
+        return bool(self.cancel_callback and self.cancel_callback())

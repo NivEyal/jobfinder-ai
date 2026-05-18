@@ -54,6 +54,30 @@ def test_railway_config_is_present():
     assert railway["deploy"]["healthcheckPath"] == "/api/status"
 
 
+def test_cancel_search_endpoint_writes_progress(tmp_path, monkeypatch):
+    config = tmp_path / "work_preferences.yaml"
+    config.write_text(
+        """
+version: 4
+output:
+  summary_dir: "{tmp}/output"
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  status_path: "{tmp}/output/subscription_status.json"
+""".format(tmp=str(tmp_path).replace("\\", "/")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORK_PREFERENCES_PATH", str(config))
+    client = TestClient(app)
+
+    response = client.post("/api/cancel-search")
+
+    assert response.status_code == 200
+    assert response.json()["phase"] == "cancelled"
+    assert (tmp_path / "output" / "cancel_search.flag").exists()
+
+
 def test_takbull_webhook_unlocks_subscription(tmp_path, monkeypatch):
     config = tmp_path / "work_preferences.yaml"
     config.write_text(

@@ -55,6 +55,20 @@ def test_search_engine_lists_sources():
     ]
 
 
+def test_search_engine_respects_cancel_callback():
+    engine = IsraelSearchEngine(sources=["remotive"], progress_callback=lambda _: None, cancel_callback=lambda: True)
+    jobs = engine.search_from_plan(
+        {
+            "total_limit": 100,
+            "jobs_per_source": 100,
+            "sources": ["remotive"],
+            "queries": [{"keywords": ["Backend Developer"], "locations": ["Remote"], "limit": 100}],
+        }
+    )
+
+    assert jobs == []
+
+
 def test_global_api_adapters_parse_jobs():
     remotive = RemotiveAdapter().parse_jobs(
         '{"jobs":[{"id":1,"title":"Backend Developer","company_name":"Remote Co","candidate_required_location":"Worldwide","description":"Python APIs","url":"https://example.com/1","publication_date":"2026-05-01T00:00:00Z"}]}',

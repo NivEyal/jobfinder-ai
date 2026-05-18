@@ -115,6 +115,8 @@ class DailyPipeline:
             return self.write_summary(summary)
 
         search_plan = SearchPlanBuilder.build(self.config)
+        if max_jobs is not None:
+            self.write_progress("מתחיל חיפוש משרות", jobs_found=0, target_jobs=max_jobs, percent=1, phase="starting")
         source_name = "pipeline"
         run_id = self.store.start_ingestion_run(source_name, search_plan)
         try:
@@ -124,7 +126,12 @@ class DailyPipeline:
             jobs = self.normalize_and_dedupe(israeli_jobs)
             saved = self.store.save_jobs(jobs)
             self.store.finish_ingestion_run(run_id, "success", jobs_found=len(jobs), jobs_saved=saved)
+            if self.cancel_requested():
+                self.write_progress("החיפוש נעצר. נשמרו המשרות שנמצאו עד עכשיו.", jobs_found=len(jobs), target_jobs=max_jobs or len(jobs), percent=100, phase="cancelled")
+            else:
+                self.write_progress("החיפוש הסתיים, מתחיל דירוג התאמות", jobs_found=len(jobs), target_jobs=max_jobs or len(jobs), percent=100, phase="matching")
         except Exception as exc:
+            self.write_progress(f"שגיאה בחיפוש: {exc}", jobs_found=0, target_jobs=max_jobs or 0, percent=100, phase="failed")
             self.store.record_ingestion_error(source_name, search_plan, exc, run_id=run_id)
             self.store.finish_ingestion_run(run_id, "failed", jobs_found=0, jobs_saved=0)
             raise
@@ -276,12 +283,62 @@ class DailyPipeline:
             search_plan = dict(search_plan)
             search_plan["total_limit"] = max_jobs
             search_plan["jobs_per_source"] = min(search_plan.get("jobs_per_source", max_jobs), max_jobs)
+            search_plan["max_pages"] = min(search_plan.get("max_pages", 3), 3)
+            priority_sources = ["remotive", "arbeitnow", "remoteok", "greenhouse", "lever"]
+            configured_sources = search_plan.get("sources", [])
+            search_plan["sources"] = [
+                source for source in priority_sources if source in configured_sources
+            ] + [source for source in configured_sources if source not in priority_sources]
             search_plan["queries"] = [
                 {**query, "limit": min(query.get("limit", max_jobs), max_jobs)}
                 for query in search_plan.get("queries", [])
             ]
-        engine = IsraelSearchEngine(sources=search_plan["sources"], max_pages=search_plan["max_pages"])
+        engine = IsraelSearchEngine(
+            sources=search_plan["sources"],
+            max_pages=search_plan["max_pages"],
+            progress_callback=self.search_progress_callback,
+            cancel_callback=self.cancel_requested,
+        )
         return engine.search_from_plan(search_plan)
+
+    def cancel_requested(self) -> bool:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        return (output_dir / "cancel_search.flag").exists()
+
+    def search_progress_callback(self, progress: Dict[str, Any]) -> None:
+        self.write_progress(
+            f"בודק מקור: {progress.get('source', '')}",
+            jobs_found=int(progress.get("jobs_found_so_far", 0)),
+            target_jobs=int(progress.get("target_jobs", 100)),
+            percent=int(progress.get("percent", 1)),
+            phase=str(progress.get("phase", "searching")),
+            source=str(progress.get("source", "")),
+        )
+
+    def write_progress(
+        self,
+        message: str,
+        jobs_found: int,
+        target_jobs: int,
+        percent: int,
+        phase: str,
+        source: str = "",
+    ) -> None:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "message": message,
+            "phase": phase,
+            "source": source,
+            "jobs_found_so_far": jobs_found,
+            "target_jobs": target_jobs,
+            "percent": max(0, min(100, percent)),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (output_dir / "job_search_progress.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def normalize_and_dedupe(self, israeli_jobs: Iterable[Any]) -> List[Job]:
         normalized_language = self.config["output"]["normalized_language"]

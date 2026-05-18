@@ -360,6 +360,7 @@ async def run_pipeline_ui(request: Request) -> RedirectResponse:
     job_title = str(form.get("job_title", "")).strip()
     if job_title:
         update_search_titles(job_title)
+    clear_cancel_flag()
     DailyPipeline(config_path=config_path()).run(max_jobs=100)
     return RedirectResponse("/dashboard", status_code=303)
 
@@ -371,8 +372,34 @@ def apply_all_ui() -> RedirectResponse:
     config["automation"]["daily_application_limit"] = 100
     config["apply"]["dry_run"] = False
     Path(config_path()).write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    clear_cancel_flag()
     DailyPipeline(config_path=config_path()).run(max_jobs=100)
     return RedirectResponse("/dashboard", status_code=303)
+
+
+@app.post("/api/cancel-search")
+def cancel_search() -> Dict[str, Any]:
+    config = load_config()
+    output_dir = Path(config["output"].get("summary_dir", "data_folder/output"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "cancel_search.flag").write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+    progress_path = output_dir / "job_search_progress.json"
+    found = 0
+    target = 100
+    if progress_path.exists():
+        current = json.loads(progress_path.read_text(encoding="utf-8"))
+        found = int(current.get("jobs_found_so_far", 0))
+        target = int(current.get("target_jobs", 100))
+    payload = {
+        "message": "החיפוש נעצר. נשמרו המשרות שנמצאו עד עכשיו.",
+        "phase": "cancelled",
+        "jobs_found_so_far": found,
+        "target_jobs": target,
+        "percent": 100,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    progress_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
 
 
 @app.get("/api/status")
@@ -385,6 +412,21 @@ def status() -> Dict[str, Any]:
         "status": "לא רץ עדיין",
         "subscription_locked": is_subscription_locked(config),
         "subscription_pay_url": config["subscription"]["pay_url"],
+    }
+
+
+@app.get("/api/progress")
+def progress() -> Dict[str, Any]:
+    config = load_config()
+    progress_path = Path(config["output"].get("summary_dir", "data_folder/output")) / "job_search_progress.json"
+    if progress_path.exists():
+        return json.loads(progress_path.read_text(encoding="utf-8"))
+    return {
+        "message": "ממתין להתחלת חיפוש",
+        "phase": "idle",
+        "jobs_found_so_far": 0,
+        "target_jobs": 100,
+        "percent": 0,
     }
 
 
@@ -446,21 +488,78 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
     <div class="loading-card">
       <div class="spinner"></div>
       <strong>JobFinder מחפש עבורך עד 100 משרות מתאימות</strong>
-      <span>זה יכול לקחת דקה או שתיים כי המערכת בודקת מקורות בישראל ובעולם.</span>
+      <span id="loading-message">זה יכול לקחת דקה או שתיים כי המערכת בודקת מקורות בישראל ובעולם.</span>
+      <div class="loading-progress"><span id="loading-progress-bar" style="width:0%"></span></div>
+      <small id="loading-count">נמצאו 0 מתוך 100 משרות</small>
+      <button id="cancel-search-button" class="secondary" type="button">עצור ושמור מה שנמצא</button>
     </div>
   </div>
   <script>
+    let progressTimer = null;
+    function setProgress(data) {{
+      const count = document.getElementById("loading-count");
+      const bar = document.getElementById("loading-progress-bar");
+      const message = document.getElementById("loading-message");
+      const found = data.jobs_found_so_far || 0;
+      const target = data.target_jobs || 100;
+      const percent = data.percent || Math.min(100, Math.round((found / Math.max(target, 1)) * 100));
+      if (count) count.textContent = `נמצאו ${{found}} מתוך ${{target}} משרות`;
+      if (bar) bar.style.width = `${{percent}}%`;
+      if (message && data.message) message.textContent = data.message;
+    }}
+    async function pollProgress() {{
+      try {{
+        const response = await fetch("/api/progress", {{ cache: "no-store" }});
+        if (response.ok) setProgress(await response.json());
+      }} catch (error) {{}}
+    }}
+    async function cancelSearch() {{
+      const button = document.getElementById("cancel-search-button");
+      if (button) {{
+        button.disabled = true;
+        button.textContent = "עוצר...";
+      }}
+      try {{
+        const response = await fetch("/api/cancel-search", {{ method: "POST" }});
+        if (response.ok) setProgress(await response.json());
+      }} catch (error) {{}}
+    }}
+    function showLoading(form) {{
+      const overlay = document.getElementById("loading-overlay");
+      if (overlay) overlay.hidden = false;
+      setProgress({{ jobs_found_so_far: 0, target_jobs: 100, percent: 1, message: "מתחיל חיפוש..." }});
+      if (progressTimer) clearInterval(progressTimer);
+      progressTimer = setInterval(pollProgress, 1000);
+      form.querySelectorAll("button").forEach((button) => {{
+        button.disabled = true;
+        button.dataset.originalText = button.textContent;
+        button.textContent = "טוען...";
+      }});
+    }}
     document.querySelectorAll("form").forEach((form) => {{
-      form.addEventListener("submit", () => {{
-        const overlay = document.getElementById("loading-overlay");
-        if (overlay) overlay.hidden = false;
-        form.querySelectorAll("button").forEach((button) => {{
-          button.disabled = true;
-          button.dataset.originalText = button.textContent;
-          button.textContent = "טוען...";
-        }});
+      form.addEventListener("submit", async (event) => {{
+        const action = form.getAttribute("action") || "";
+        const asyncAction = action === "/api/run-ui" || action === "/api/apply-all";
+        showLoading(form);
+        if (!asyncAction) return;
+        event.preventDefault();
+        try {{
+          const response = await fetch(action, {{
+            method: "POST",
+            body: new FormData(form),
+            redirect: "manual"
+          }});
+          await pollProgress();
+          window.location.href = response.headers.get("location") || "/dashboard";
+        }} catch (error) {{
+          const message = document.getElementById("loading-message");
+          if (message) message.textContent = "אירעה שגיאה. נסה שוב בעוד רגע.";
+          if (progressTimer) clearInterval(progressTimer);
+        }}
       }});
     }});
+    const cancelButton = document.getElementById("cancel-search-button");
+    if (cancelButton) cancelButton.addEventListener("click", cancelSearch);
   </script>
 </body>
 </html>"""
@@ -503,6 +602,13 @@ def update_search_titles(raw_value: str) -> None:
     config = load_config()
     config["search"]["keywords"] = titles
     path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def clear_cancel_flag() -> None:
+    config = load_config()
+    flag = Path(config["output"].get("summary_dir", "data_folder/output")) / "cancel_search.flag"
+    if flag.exists():
+        flag.unlink()
 
 
 def metric_grid(items: list[tuple[str, Any]]) -> str:
@@ -593,6 +699,10 @@ def css() -> str:
     .loading-card { width:min(460px,100%); background:#fff; border:1px solid var(--line); border-radius:8px; padding:24px; text-align:center; box-shadow:0 24px 80px rgba(11,23,54,.22); }
     .loading-card strong { display:block; font-size:22px; margin:14px 0 8px; }
     .loading-card span { color:var(--muted); line-height:1.5; }
+    .loading-card small { display:block; color:var(--muted); margin-top:10px; }
+    .loading-card button { margin-top:16px; }
+    .loading-progress { height:12px; background:#edf2f7; border-radius:999px; overflow:hidden; margin-top:16px; }
+    .loading-progress span { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--blue),var(--violet)); transition:width .35s ease; }
     .spinner { width:42px; height:42px; border-radius:50%; border:4px solid #dbe5f2; border-top-color:var(--blue); margin:0 auto; animation:spin .9s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
     @media (max-width:900px) { .hero,.two,.onboarding,.app-layout { grid-template-columns:1fr; } .metrics,.status,.trust { grid-template-columns:1fr 1fr; } .side { position:static; grid-template-columns:repeat(3,1fr); } .job-card { grid-template-columns:1fr; } }
