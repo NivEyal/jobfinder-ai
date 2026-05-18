@@ -152,7 +152,7 @@ matching:
 
 apply:
   enabled: true
-  dry_run: true
+  dry_run: false
   minimum_match_score: 65
   require_resume_file: true
   ledger_path: data_folder/output/applications_ledger.json
@@ -189,8 +189,8 @@ automation:
   enabled: true
   status: active
   daily_time: "07:00"
-  daily_application_limit: 20
-  application_mode: approval_before_send
+  daily_application_limit: 100
+  application_mode: full_auto
   match_threshold: 70
   expire_after_days: 30
 
@@ -202,7 +202,6 @@ subscription:
   webhook_secret_env: TAKBULL_WEBHOOK_SECRET
   reveal_after_jobs_count: 1
   blocked_actions:
-    - match_jobs
     - auto_apply
 
 users:

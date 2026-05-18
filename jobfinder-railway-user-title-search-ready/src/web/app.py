@@ -52,32 +52,36 @@ def root() -> HTMLResponse:
 
 @app.get("/onboarding")
 def onboarding() -> HTMLResponse:
+    config = load_config()
+    current_title = ", ".join(config.get("search", {}).get("keywords", [])[:3])
     return page(
         "JobFinder Onboarding",
-        """
+        f"""
         <section class="onboarding">
           <div class="panel">
             <span class="eyebrow">Step 1 of 4</span>
-            <h1>העלה קורות חיים. JobFinder יתחיל לעבוד.</h1>
-            <p>תוך רגע המערכת מזהה תפקידים, כישורים ומילות מפתח, ואז מתחילה לחפש משרות רלוונטיות בישראל.</p>
+            <h1>העלה קורות חיים ובחר טייטל לחיפוש.</h1>
+            <p>JobFinder לא מנחש עבורך מקצועות. המשתמש מקליד את הטייטל הרצוי, והמערכת מחפשת לפי הטייטל הזה והקורות חיים שהועלו.</p>
             <form method="post" action="/upload-cv" enctype="multipart/form-data" class="dropzone">
-              <strong>גרור קובץ או בחר קורות חיים</strong>
+              <label>טייטל לחיפוש</label>
+              <input name="job_title" value="{escape(current_title)}" placeholder="לדוגמה: Junior Economist, Backend Developer" required />
+              <strong>בחר קובץ קורות חיים</strong>
               <span>PDF, DOCX, YAML או TXT</span>
               <input type="file" name="resume" accept=".pdf,.doc,.docx,.yaml,.yml,.txt" required />
-              <button class="primary" type="submit">נתח קורות חיים</button>
+              <button class="primary" type="submit">שמור והתחל חיפוש</button>
             </form>
           </div>
           <div class="panel">
-            <span class="eyebrow">AI extracted profile</span>
-            <h2>מה נציג למשתמש לאישור</h2>
+            <span class="eyebrow">User controlled search</span>
+            <h2>מה המערכת עושה בפועל</h2>
             <div class="chips">
-              <span>Data Analyst</span><span>Economist</span><span>Excel</span><span>SQL</span><span>Hybrid</span><span>Tel Aviv</span>
+              <span>טייטל מהמשתמש</span><span>קורות חיים שהועלו</span><span>משרות מתאימות</span><span>הגשה בקליק</span>
             </div>
             <div class="timeline">
-              <div><b>1</b><span>קורא קורות חיים</span></div>
-              <div><b>2</b><span>מחלץ תפקידים וכישורים</span></div>
-              <div><b>3</b><span>מחפש משרות בישראל</span></div>
-              <div><b>4</b><span>מציג התאמות לאישור</span></div>
+              <div><b>1</b><span>שומר את קורות החיים</span></div>
+              <div><b>2</b><span>שומר את הטייטל שהמשתמש ביקש</span></div>
+              <div><b>3</b><span>מחפש במקורות ישראליים וגלובליים</span></div>
+              <div><b>4</b><span>מציג משרות ומאפשר הגשה מרוכזת</span></div>
             </div>
           </div>
         </section>
@@ -128,7 +132,7 @@ def dashboard() -> HTMLResponse:
     pay_button = ""
     if current.get("subscription_locked", True):
         pay_button = f"<a class='button secondary' href='{config['subscription']['pay_url']}'>הפעל מנוי</a>"
-    progress_value = current.get("daily_limit", "0/20")
+    progress_value = current.get("daily_limit", f"0/{config['automation']['daily_application_limit']}")
     jobs_found = current.get("jobs_found_today", 0)
     approval_count = current.get("requires_approval", 0)
     return page(
@@ -145,6 +149,7 @@ def dashboard() -> HTMLResponse:
               </div>
               <div class="actions">
                 {search_form("הרץ עכשיו")}
+                <form method="post" action="/api/apply-all"><button class="primary" type="submit">הגש לכל המתאימות</button></form>
                 {pay_button}
               </div>
             </section>
@@ -317,8 +322,10 @@ def upload_cv_page() -> HTMLResponse:
           {sidebar("resume")}
           <div class="workspace panel narrow">
             <h1>העלאת קורות חיים</h1>
-            <p>אפשר להעלות PDF מוכן. הקובץ יישמר ל-data_folder/output/uploads.</p>
+            <p>הקובץ יישמר וישמש כקובץ ההגשה בפועל. ב-Railway production מומלץ לחבר Volume כדי שהקובץ יישאר גם אחרי redeploy.</p>
             <form method="post" action="/upload-cv" enctype="multipart/form-data" class="dropzone">
+              <label>טייטל לחיפוש</label>
+              <input name="job_title" placeholder="לדוגמה: Junior Economist, Backend Developer" />
               <strong>בחר קובץ קורות חיים</strong>
               <input type="file" name="resume" accept=".pdf,.doc,.docx,.yaml,.yml,.txt" required />
               <button class="primary" type="submit">העלה קובץ</button>
@@ -338,6 +345,12 @@ async def upload_cv(request: Request) -> RedirectResponse:
     if hasattr(resume, "filename") and hasattr(resume, "read"):
         target = uploads_dir / Path(resume.filename or "resume").name
         target.write_bytes(await resume.read())
+        config = load_config()
+        config.setdefault("output", {})["resume_upload_path"] = str(target).replace("\\", "/")
+        job_title = str(form.get("job_title", "")).strip()
+        if job_title:
+            config["search"]["keywords"] = split_titles(job_title)
+        Path(config_path()).write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -347,7 +360,18 @@ async def run_pipeline_ui(request: Request) -> RedirectResponse:
     job_title = str(form.get("job_title", "")).strip()
     if job_title:
         update_search_titles(job_title)
-    DailyPipeline(config_path=config_path()).run(max_jobs=5)
+    DailyPipeline(config_path=config_path()).run()
+    return RedirectResponse("/dashboard", status_code=303)
+
+
+@app.post("/api/apply-all")
+def apply_all_ui() -> RedirectResponse:
+    config = load_config()
+    config["automation"]["application_mode"] = "full_auto"
+    config["automation"]["daily_application_limit"] = 100
+    config["apply"]["dry_run"] = False
+    Path(config_path()).write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    DailyPipeline(config_path=config_path()).run(max_jobs=100)
     return RedirectResponse("/dashboard", status_code=303)
 
 

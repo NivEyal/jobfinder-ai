@@ -24,12 +24,13 @@ def test_work_preferences_v4_validates_and_builds_broad_search_plan():
     assert config["matching"]["api_key_env"] == "OPENAI_API_KEY"
     assert config["matching"]["fallback"] == "rule_based"
     assert config["apply"]["enabled"] is True
-    assert config["apply"]["dry_run"] is True
+    assert config["apply"]["dry_run"] is False
     assert "email" in config["apply"]["allowed_methods"]
     assert config["storage"]["backend"] == "sqlite"
     assert config["storage"]["sqlite_path"].endswith(".sqlite3")
     assert config["automation"]["status"] == "active"
-    assert config["automation"]["application_mode"] == "approval_before_send"
+    assert config["automation"]["daily_application_limit"] == 100
+    assert config["automation"]["application_mode"] == "full_auto"
     assert config["automation"]["match_threshold"] == 70
     assert config["subscription"]["enabled"] is True
     assert config["subscription"]["pay_url"] == "https://paypage.takbull.co.il/2dBbl"

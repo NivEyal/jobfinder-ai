@@ -95,10 +95,11 @@ class DailyPipeline:
         cover_letter_path: str | Path = "data_folder/cover_letter_template.txt",
     ):
         self.config_path = Path(config_path)
-        self.resume_path = Path(resume_path)
+        self.profile_resume_path = Path(resume_path)
         self.cover_letter_path = Path(cover_letter_path)
         self.config = ConfigValidator.validate_config(self.config_path)
-        IsraeliResume.from_path(self.resume_path)
+        IsraeliResume.from_path(self.profile_resume_path)
+        self.resume_path = self.resolve_resume_path()
         storage_config = self.config["storage"]
         self.store = SQLiteStore(storage_config["sqlite_path"])
         self.jsonl = JsonlStore(storage_config["jsonl_dir"])
@@ -128,40 +129,7 @@ class DailyPipeline:
             raise
 
         blocked_user = next((user for user in active_users if self.subscription_gate.should_block(len(jobs), user)), None)
-        if blocked_user:
-            gate_payload = self.subscription_gate.status_payload(len(jobs))
-            summary = PipelineSummary(
-                automation_status=automation["status"],
-                last_run_at=local_display_time(now),
-                next_run_at=self.next_run_display(now),
-                jobs_found_today=len(jobs),
-                applications_sent_today=0,
-                requires_approval=0,
-                daily_limit_used=0,
-                daily_limit=automation["daily_application_limit"],
-                matched_jobs=0,
-                rejected_by_rules=0,
-                requires_manual=0,
-                failed=0,
-                mode=automation["application_mode"],
-                threshold=automation["match_threshold"],
-                subscription_required=True,
-                subscription_locked=True,
-                subscription_pay_url=gate_payload["pay_url"],
-                subscription_message=gate_payload["message"],
-                inbox=[
-                    {
-                        "status": "payment_required",
-                        "status_label": STATUS_LABELS_HE["payment_required"],
-                        "detail": gate_payload["message"],
-                        "pay_url": gate_payload["pay_url"],
-                        "jobs_found": len(jobs),
-                    }
-                ],
-            )
-            self.store.log_application("subscription_gate_blocked", gate_payload["message"], level="warning", extra=gate_payload)
-            self.jsonl.append("subscription_gates", gate_payload)
-            return self.write_summary(summary)
+        gate_payload = self.subscription_gate.status_payload(len(jobs)) if blocked_user else None
 
         inbox: List[Dict[str, Any]] = []
         sent = 0
@@ -177,7 +145,7 @@ class DailyPipeline:
         for user in active_users:
             matcher = JobMatcher(self.user_config(user))
             apply_engine = AutoApplyEngine(self.user_config(user))
-            resume_text = self.resume_path.read_text(encoding="utf-8")
+            resume_text = self.read_resume_text()
             for job in jobs:
                 match = matcher.match(job, resume_text)
                 if match.score < threshold:
@@ -185,6 +153,10 @@ class DailyPipeline:
                     inbox.append(self.inbox_item(job, match, "blocked", "score below threshold"))
                     continue
                 matched_jobs += 1
+                if gate_payload and "auto_apply" in self.config["subscription"].get("blocked_actions", []):
+                    requires_approval += 1
+                    inbox.append(self.inbox_item(job, match, "payment_required", gate_payload["message"]))
+                    continue
                 if daily_limit_used >= daily_limit:
                     requires_approval += 1
                     inbox.append(self.inbox_item(job, match, "pending_approval", "daily limit reached"))
@@ -243,6 +215,10 @@ class DailyPipeline:
             failed=failed,
             mode=automation["application_mode"],
             threshold=threshold,
+            subscription_required=bool(gate_payload),
+            subscription_locked=bool(gate_payload),
+            subscription_pay_url=gate_payload["pay_url"] if gate_payload else "",
+            subscription_message=gate_payload["message"] if gate_payload else "",
             inbox=inbox[:100],
         )
         return self.write_summary(summary)
@@ -252,7 +228,7 @@ class DailyPipeline:
         active = [user for user in users if user.get("active", True)]
         if active:
             return active
-        personal = IsraeliResume.from_path(self.resume_path).data["personal_information"]
+        personal = IsraeliResume.from_path(self.profile_resume_path).data["personal_information"]
         return [
             {
                 "id": "default",
@@ -268,6 +244,18 @@ class DailyPipeline:
         config["apply"] = dict(self.config["apply"])
         config["apply"]["dry_run"] = self.config["automation"]["application_mode"] != "full_auto" or self.config["apply"]["dry_run"]
         return config
+
+    def resolve_resume_path(self) -> Path:
+        configured = self.config.get("output", {}).get("resume_upload_path", "")
+        if configured and Path(configured).exists():
+            return Path(configured)
+        return self.profile_resume_path
+
+    def read_resume_text(self) -> str:
+        try:
+            return self.resume_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, FileNotFoundError):
+            return IsraeliResume.from_path(self.profile_resume_path).render_text("en")
 
     def fetch_jobs(self, search_plan: Dict[str, Any], max_jobs: int | None = None) -> List[Any]:
         if max_jobs is not None:
