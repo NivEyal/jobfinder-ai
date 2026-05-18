@@ -147,6 +147,8 @@ matching:
   minimum_score: 65
   strong_match_score: 80
   possible_match_score: 60
+  openai_max_jobs_per_run: 20
+  openai_max_workers: 6
   max_description_chars: 4000
   timeout_seconds: 30
 

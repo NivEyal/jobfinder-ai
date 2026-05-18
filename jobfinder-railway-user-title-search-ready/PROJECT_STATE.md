@@ -48,3 +48,12 @@ This file tracks product decisions and fixes so future point fixes stay consiste
 - Changed daily limit from `20` to `100`.
 - Changed subscription behavior from blocking matching to blocking auto apply only.
 - Persisted uploaded resume path in config for subsequent pipeline runs.
+- UI search/apply actions now start a background pipeline instead of blocking the HTTP request.
+- `/api/progress` exposes live progress from `data_folder/output/job_search_progress.json`.
+- `/api/cancel-search` writes `cancel_search.flag`; search checks it between sources and stops with saved jobs.
+- AI insights are generated from real match results in `ai_insights.json`; OpenAI is used for top matches up to `matching.openai_max_jobs_per_run`.
+- Performance patch: source search runs in parallel with early shutdown at the target limit.
+- UI search uses fast mode: priority global sources first, `max_pages=1`, `max_workers=12`, `max_tasks=36`, target 100 jobs.
+- Fetch timeout is 8 seconds instead of 20.
+- Matching uses local prefiltering first, then parallel OpenAI only for the strongest jobs (`openai_max_workers=6`).
+- Auto-apply remains sequential with throttle to avoid duplicate or spammy submissions.

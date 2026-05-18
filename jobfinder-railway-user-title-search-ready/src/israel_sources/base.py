@@ -60,7 +60,7 @@ class IsraelSourceAdapter:
                 break
         return jobs
 
-    def fetch(self, url: str, timeout: int = 20) -> str:
+    def fetch(self, url: str, timeout: int = 8) -> str:
         request = Request(
             url,
             headers={

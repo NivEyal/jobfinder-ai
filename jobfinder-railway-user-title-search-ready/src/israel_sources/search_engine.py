@@ -1,3 +1,4 @@
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, Iterable, List
 
 from src.israel_sources.base import SearchQuery
@@ -37,6 +38,68 @@ class IsraelSearchEngine:
         return jobs[:limit]
 
     def search_from_plan(self, search_plan: Dict[str, Any]) -> List[IsraeliJob]:
+        total_limit = search_plan.get("total_limit", 100)
+        jobs_per_source = search_plan.get("jobs_per_source", 25)
+        max_workers = int(search_plan.get("max_workers", 10))
+        max_tasks = int(search_plan.get("max_tasks", 80))
+        jobs: List[IsraeliJob] = []
+        seen = set()
+        queries = search_plan.get("queries", [])
+        tasks = []
+
+        for query_spec in queries:
+            query = SearchQuery(
+                keywords=query_spec.get("keywords", []),
+                locations=query_spec.get("locations", []),
+                limit=min(query_spec.get("limit", jobs_per_source), total_limit),
+            )
+            for adapter in self.adapters:
+                tasks.append((adapter, query))
+                if len(tasks) >= max_tasks:
+                    break
+            if len(tasks) >= max_tasks:
+                break
+
+        total_steps = max(1, len(tasks))
+        completed = 0
+        executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
+        futures = {executor.submit(self.search_adapter, adapter, query): adapter for adapter, query in tasks}
+        try:
+            pending = set(futures)
+            while pending and len(jobs) < total_limit:
+                if self.cancel_requested():
+                    self.emit_progress(search_plan, completed, total_steps, len(jobs), "", "cancelled")
+                    break
+                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+                for future in done:
+                    completed += 1
+                    adapter = futures[future]
+                    try:
+                        query_jobs = future.result()
+                    except Exception as exc:
+                        self.emit_progress(search_plan, completed, total_steps, len(jobs), adapter.source, f"error: {exc}")
+                        continue
+                    for job in query_jobs:
+                        key = (job.source, job.source_job_id)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        jobs.append(job)
+                        if len(jobs) >= total_limit:
+                            self.emit_progress(search_plan, completed, total_steps, len(jobs), adapter.source, "complete")
+                            return jobs[:total_limit]
+                    self.emit_progress(search_plan, completed, total_steps, len(jobs), adapter.source, "searching")
+            return jobs[:total_limit]
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    @staticmethod
+    def search_adapter(adapter: Any, query: SearchQuery) -> List[IsraeliJob]:
+        return adapter.search(query)
+
+    def search_from_plan_serial(self, search_plan: Dict[str, Any]) -> List[IsraeliJob]:
         total_limit = search_plan.get("total_limit", 100)
         jobs_per_source = search_plan.get("jobs_per_source", 25)
         jobs: List[IsraeliJob] = []

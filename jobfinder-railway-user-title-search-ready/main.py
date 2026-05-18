@@ -157,7 +157,15 @@ class ConfigValidator:
         cls._require_type(matching, "api_key_env", str, config_path)
         cls._require_type(matching, "fallback", str, config_path)
         cls._validate_allowed_values([matching["fallback"]], {"rule_based"}, "matching.fallback", config_path)
-        for key in ["minimum_score", "strong_match_score", "possible_match_score", "max_description_chars", "timeout_seconds"]:
+        for key in [
+            "minimum_score",
+            "strong_match_score",
+            "possible_match_score",
+            "openai_max_jobs_per_run",
+            "openai_max_workers",
+            "max_description_chars",
+            "timeout_seconds",
+        ]:
             cls._require_type(matching, key, int, config_path)
         if not 0 <= matching["possible_match_score"] <= matching["strong_match_score"] <= 100:
             raise ConfigError(f"matching thresholds must be between 0 and 100 in {config_path}")

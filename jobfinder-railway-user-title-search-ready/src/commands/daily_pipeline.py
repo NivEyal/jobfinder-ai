@@ -1,6 +1,7 @@
 import argparse
 import json
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from src.apply import ApplicationRequest, ApplicationResult, AutoApplyEngine
 from src.israel_sources.search_engine import IsraelSearchEngine
 from src.job import Job
 from src.matching import JobMatcher, MatchResult
+from src.matching.rule_based_matcher import RuleBasedMatcher
 from src.resume_schemas.israeli_resume import IsraeliResume
 from src.storage import JsonlStore, SQLiteStore
 from src.subscription import SubscriptionGate
@@ -148,17 +150,32 @@ class DailyPipeline:
         matched_jobs = 0
         daily_limit_used = 0
         apply_attempts = 0
+        match_results: List[MatchResult] = []
         daily_limit = automation["daily_application_limit"]
         threshold = automation["match_threshold"]
         throttle_every = int(automation.get("apply_throttle_every", 10))
         throttle_seconds = int(automation.get("apply_throttle_seconds", 3))
+        openai_max_jobs = int(self.config.get("matching", {}).get("openai_max_jobs_per_run", 20))
 
         for user in active_users:
             matcher = JobMatcher(self.user_config(user))
+            fallback_matcher = RuleBasedMatcher(self.user_config(user))
             apply_engine = AutoApplyEngine(self.user_config(user))
             resume_text = self.read_resume_text()
-            for job in jobs:
-                match = matcher.match(job, resume_text)
+            matched_pairs = self.match_jobs_fast(jobs, matcher, fallback_matcher, resume_text, openai_max_jobs)
+            for index, (job, match) in enumerate(matched_pairs, start=1):
+                if self.cancel_requested():
+                    self.write_progress("הפעולה נעצרה. נשמרו המשרות שנמצאו עד עכשיו.", len(jobs), len(jobs), 100, "cancelled")
+                    break
+                match_results.append(match)
+                if index == 1 or index % 5 == 0:
+                    self.write_progress(
+                        "מכין הגשות לפי דירוג ההתאמה",
+                        jobs_found=len(jobs),
+                        target_jobs=len(jobs),
+                        percent=min(99, 70 + int(index / max(len(jobs), 1) * 25)),
+                        phase="matching",
+                    )
                 if match.score < threshold:
                     rejected += 1
                     inbox.append(self.inbox_item(job, match, "blocked", "score below threshold"))
@@ -214,6 +231,7 @@ class DailyPipeline:
                     self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
 
         self.mark_old_jobs_inactive(days=automation["expire_after_days"])
+        self.write_ai_insights(match_results, jobs)
         summary = PipelineSummary(
             automation_status=automation["status"],
             last_run_at=local_display_time(now),
@@ -235,7 +253,61 @@ class DailyPipeline:
             subscription_message=gate_payload["message"] if gate_payload else "",
             inbox=inbox[:100],
         )
+        self.write_progress("הפעולה הסתיימה. המשרות נשמרו בדשבורד.", len(jobs), len(jobs), 100, "complete")
         return self.write_summary(summary)
+
+    def match_jobs_fast(
+        self,
+        jobs: List[Job],
+        matcher: JobMatcher,
+        fallback_matcher: RuleBasedMatcher,
+        resume_text: str,
+        openai_max_jobs: int,
+    ) -> List[tuple[Job, MatchResult]]:
+        if not jobs:
+            return []
+        self.write_progress("מסנן התאמות מקומית לפני OpenAI", len(jobs), len(jobs), 70, "matching")
+        local_pairs = [(job, fallback_matcher.match(job, resume_text)) for job in jobs]
+        local_pairs.sort(key=lambda item: item[1].score, reverse=True)
+
+        if self.config.get("matching", {}).get("provider") != "openai" or openai_max_jobs <= 0:
+            return local_pairs
+
+        top_jobs = [job for job, _ in local_pairs[:openai_max_jobs]]
+        max_workers = int(self.config.get("matching", {}).get("openai_max_workers", 6))
+        openai_results: Dict[str, MatchResult] = {}
+        executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
+        futures = {executor.submit(matcher.match, job, resume_text): job for job in top_jobs}
+        completed = 0
+        try:
+            pending = set(futures)
+            while pending:
+                if self.cancel_requested():
+                    self.write_progress("דירוג OpenAI נעצר לבקשת המשתמש", len(jobs), len(jobs), 100, "cancelled")
+                    break
+                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+                for future in done:
+                    completed += 1
+                    job = futures[future]
+                    try:
+                        openai_results[job.fingerprint] = future.result()
+                    except Exception:
+                        pass
+                    self.write_progress(
+                        f"מדרג התאמות עם OpenAI ({completed}/{len(top_jobs)})",
+                        jobs_found=len(jobs),
+                        target_jobs=len(jobs),
+                        percent=min(98, 75 + int(completed / max(len(top_jobs), 1) * 20)),
+                        phase="matching",
+                    )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        merged = [(job, openai_results.get(job.fingerprint, match)) for job, match in local_pairs]
+        merged.sort(key=lambda item: item[1].score, reverse=True)
+        return merged
 
     def load_active_users(self) -> List[Dict[str, Any]]:
         users = self.config.get("users", [])
@@ -283,7 +355,9 @@ class DailyPipeline:
             search_plan = dict(search_plan)
             search_plan["total_limit"] = max_jobs
             search_plan["jobs_per_source"] = min(search_plan.get("jobs_per_source", max_jobs), max_jobs)
-            search_plan["max_pages"] = min(search_plan.get("max_pages", 3), 3)
+            search_plan["max_pages"] = min(search_plan.get("max_pages", 1), 1)
+            search_plan["max_workers"] = 12
+            search_plan["max_tasks"] = 36
             priority_sources = ["remotive", "arbeitnow", "remoteok", "greenhouse", "lever"]
             configured_sources = search_plan.get("sources", [])
             search_plan["sources"] = [
@@ -336,6 +410,33 @@ class DailyPipeline:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         (output_dir / "job_search_progress.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def write_ai_insights(self, matches: List[MatchResult], jobs: List[Job]) -> None:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        openai_used = sum(1 for match in matches if match.used_openai)
+        top_matches = sorted(matches, key=lambda item: item.score, reverse=True)[:5]
+        missing = []
+        reasons = []
+        for match in top_matches:
+            missing.extend(match.missing_requirements[:3])
+            reasons.extend(match.reasons[:3])
+        payload = {
+            "openai_used": openai_used,
+            "model": self.config.get("matching", {}).get("model", ""),
+            "jobs_analyzed": len(matches),
+            "top_score": top_matches[0].score if top_matches else 0,
+            "insights": [
+                f"OpenAI ניתח {openai_used} מתוך {len(matches)} משרות מובילות; שאר המשרות דורגו מהר יותר עם fallback מקומי.",
+                f"ציון ההתאמה הגבוה ביותר כרגע הוא {top_matches[0].score if top_matches else 0}.",
+                f"דרישות שחוזרות במשרות מובילות: {', '.join(dict.fromkeys(missing[:5])) or 'אין מספיק נתונים עדיין'}.",
+                f"סיבות התאמה בולטות: {', '.join(dict.fromkeys(reasons[:5])) or 'אין מספיק נתונים עדיין'}.",
+            ],
+        }
+        (output_dir / "ai_insights.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
