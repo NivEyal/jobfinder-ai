@@ -1,5 +1,6 @@
 import argparse
 import json
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -139,8 +140,11 @@ class DailyPipeline:
         failed = 0
         matched_jobs = 0
         daily_limit_used = 0
+        apply_attempts = 0
         daily_limit = automation["daily_application_limit"]
         threshold = automation["match_threshold"]
+        throttle_every = int(automation.get("apply_throttle_every", 10))
+        throttle_seconds = int(automation.get("apply_throttle_seconds", 3))
 
         for user in active_users:
             matcher = JobMatcher(self.user_config(user))
@@ -170,6 +174,7 @@ class DailyPipeline:
                     inbox.append(self.inbox_item(job, match, "pending_approval", "approval required before sending"))
                     continue
                 try:
+                    apply_attempts += 1
                     result = apply_engine.apply(
                         ApplicationRequest(
                             job=job,
@@ -194,10 +199,12 @@ class DailyPipeline:
                         rejected += 1
                     elif result.status == "failed":
                         failed += 1
+                    self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
                 except Exception as exc:
                     failed += 1
                     self.store.record_ingestion_error("auto_apply", {"job": job.fingerprint}, exc)
                     inbox.append(self.inbox_item(job, match, "failed", str(exc)))
+                    self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
 
         self.mark_old_jobs_inactive(days=automation["expire_after_days"])
         summary = PipelineSummary(
@@ -256,6 +263,13 @@ class DailyPipeline:
             return self.resume_path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, FileNotFoundError):
             return IsraeliResume.from_path(self.profile_resume_path).render_text("en")
+
+    @staticmethod
+    def throttle_apply(apply_attempts: int, throttle_every: int, throttle_seconds: int) -> None:
+        if throttle_every <= 0 or throttle_seconds <= 0:
+            return
+        if apply_attempts > 0 and apply_attempts % throttle_every == 0:
+            time.sleep(throttle_seconds)
 
     def fetch_jobs(self, search_plan: Dict[str, Any], max_jobs: int | None = None) -> List[Any]:
         if max_jobs is not None:

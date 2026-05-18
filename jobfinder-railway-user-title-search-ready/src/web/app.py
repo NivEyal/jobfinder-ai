@@ -360,7 +360,7 @@ async def run_pipeline_ui(request: Request) -> RedirectResponse:
     job_title = str(form.get("job_title", "")).strip()
     if job_title:
         update_search_titles(job_title)
-    DailyPipeline(config_path=config_path()).run()
+    DailyPipeline(config_path=config_path()).run(max_jobs=100)
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -442,6 +442,26 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
     <main>{body}</main>
     <footer>JobFinder | {BRAND_TAGLINE}</footer>
   </div>
+  <div id="loading-overlay" class="loading-overlay" hidden>
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <strong>JobFinder מחפש עבורך עד 100 משרות מתאימות</strong>
+      <span>זה יכול לקחת דקה או שתיים כי המערכת בודקת מקורות בישראל ובעולם.</span>
+    </div>
+  </div>
+  <script>
+    document.querySelectorAll("form").forEach((form) => {{
+      form.addEventListener("submit", () => {{
+        const overlay = document.getElementById("loading-overlay");
+        if (overlay) overlay.hidden = false;
+        form.querySelectorAll("button").forEach((button) => {{
+          button.disabled = true;
+          button.dataset.originalText = button.textContent;
+          button.textContent = "טוען...";
+        }});
+      }});
+    }});
+  </script>
 </body>
 </html>"""
     return HTMLResponse(html)
@@ -531,6 +551,7 @@ def css() -> str:
     .search-inline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .search-inline input { min-width:min(360px, 100%); }
     .button, button { border:0; border-radius:8px; padding:13px 18px; font-size:16px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-block; }
+    button:disabled { opacity:.72; cursor:wait; }
     .primary { color:#fff; background:linear-gradient(90deg,var(--blue),var(--violet)); }
     .secondary, .ghost { color:var(--ink); background:#fff; border:1px solid var(--line); }
     .logo-panel { display:grid; place-items:center; }
@@ -567,6 +588,13 @@ def css() -> str:
     table { width:100%; border-collapse:collapse; }
     th, td { border-bottom:1px solid var(--line); text-align:right; padding:12px; }
     footer { padding:24px 0; color:var(--muted); border-top:1px solid var(--line); margin-top:42px; }
+    .loading-overlay { position:fixed; inset:0; background:rgba(11,23,54,.42); z-index:50; display:grid; place-items:center; padding:24px; }
+    .loading-overlay[hidden] { display:none; }
+    .loading-card { width:min(460px,100%); background:#fff; border:1px solid var(--line); border-radius:8px; padding:24px; text-align:center; box-shadow:0 24px 80px rgba(11,23,54,.22); }
+    .loading-card strong { display:block; font-size:22px; margin:14px 0 8px; }
+    .loading-card span { color:var(--muted); line-height:1.5; }
+    .spinner { width:42px; height:42px; border-radius:50%; border:4px solid #dbe5f2; border-top-color:var(--blue); margin:0 auto; animation:spin .9s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
     @media (max-width:900px) { .hero,.two,.onboarding,.app-layout { grid-template-columns:1fr; } .metrics,.status,.trust { grid-template-columns:1fr 1fr; } .side { position:static; grid-template-columns:repeat(3,1fr); } .job-card { grid-template-columns:1fr; } }
     @media (max-width:560px) { .metrics,.status,.trust,.side { grid-template-columns:1fr; } header { align-items:flex-start; flex-direction:column; } }
     """

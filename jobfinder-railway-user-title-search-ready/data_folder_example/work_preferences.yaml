@@ -190,6 +190,8 @@ automation:
   status: active
   daily_time: "07:00"
   daily_application_limit: 100
+  apply_throttle_every: 10
+  apply_throttle_seconds: 3
   application_mode: full_auto
   match_threshold: 70
   expire_after_days: 30

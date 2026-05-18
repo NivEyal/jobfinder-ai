@@ -91,3 +91,14 @@ def test_daily_pipeline_subscription_gate_blocks_after_showing_jobs(tmp_path):
     assert user_status["subscription_pay_url"] == "https://paypage.takbull.co.il/2dBbl"
     assert user_status["application_inbox"][0]["status"] == "payment_required"
     assert summary.matched_jobs == 2
+
+
+def test_apply_throttle_sleeps_after_every_batch(monkeypatch):
+    calls = []
+    monkeypatch.setattr("src.commands.daily_pipeline.time.sleep", lambda seconds: calls.append(seconds))
+
+    DailyPipeline.throttle_apply(9, throttle_every=10, throttle_seconds=3)
+    DailyPipeline.throttle_apply(10, throttle_every=10, throttle_seconds=3)
+    DailyPipeline.throttle_apply(20, throttle_every=10, throttle_seconds=3)
+
+    assert calls == [3, 3]
