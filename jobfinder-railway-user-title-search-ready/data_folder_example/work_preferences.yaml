@@ -120,6 +120,7 @@ sources:
   - indeed
   - Jobnet
   - company_careers
+  - comeet
   - remotive
   - arbeitnow
   - remoteok
@@ -145,7 +146,7 @@ filters:
 matching:
   enabled: true
   provider: openai
-  model: gpt-5-mini
+  model: gpt-4o-mini
   api_key_env: OPENAI_API_KEY
   fallback: rule_based
   minimum_score: 65

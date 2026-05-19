@@ -5,6 +5,7 @@ from src.israel_sources.Jobnet import JobnetAdapter
 from src.israel_sources.alljobs import AllJobsAdapter
 from src.israel_sources.base import IsraelSourceAdapter, SearchQuery
 from src.israel_sources.company_careers import CompanyCareersAdapter
+from src.israel_sources.comeet import ComeetAdapter
 from src.israel_sources.drushim import DrushimAdapter
 from src.israel_sources.gotfriends import GotFriendsAdapter
 from src.israel_sources.global_apis import ArbeitnowAdapter, GreenhouseAdapter, LeverAdapter, RemoteOkAdapter, RemotiveAdapter
@@ -23,6 +24,7 @@ ADAPTER_CLASSES: Dict[str, Type[IsraelSourceAdapter]] = {
     "Jobnet": JobnetAdapter,
     "jobnet": JobnetAdapter,
     "company_careers": CompanyCareersAdapter,
+    "comeet": ComeetAdapter,
     "remotive": RemotiveAdapter,
     "arbeitnow": ArbeitnowAdapter,
     "remoteok": RemoteOkAdapter,
@@ -48,6 +50,7 @@ def get_all_adapters() -> List[IsraelSourceAdapter]:
         "indeed",
         "Jobnet",
         "company_careers",
+        "comeet",
         "remotive",
         "arbeitnow",
         "remoteok",

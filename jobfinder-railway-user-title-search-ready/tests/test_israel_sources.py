@@ -47,6 +47,7 @@ def test_search_engine_lists_sources():
         "indeed",
         "jobnet",
         "company_careers",
+        "comeet",
         "remotive",
         "arbeitnow",
         "remoteok",
@@ -145,6 +146,38 @@ def test_parallel_search_filters_each_future_with_its_own_query():
     )
 
     assert {job.title for job in jobs} == {"Alpha Developer", "Beta Analyst"}
+
+
+def test_comeet_adapter_extracts_israel_jobs_from_positions_data():
+    comeet = get_adapter("comeet")
+    jobs = comeet.parse_jobs(
+        """
+        <script>
+        COMPANY_POSITIONS_DATA = [
+          {
+            "uid": "abc123",
+            "name": "Backend Developer",
+            "company_name": "ExampleCo",
+            "url_comeet_hosted_page": "https://www.comeet.com/jobs/example/abc123",
+            "location": {"name": "Tel Aviv, Israel", "city": "Tel Aviv", "country": "Israel"}
+          },
+          {
+            "uid": "outside",
+            "name": "Sales Manager",
+            "company_name": "ExampleCo",
+            "url_comeet_hosted_page": "https://www.comeet.com/jobs/example/outside",
+            "location": {"name": "Berlin", "city": "Berlin", "country": "Germany"}
+          }
+        ];
+        </script>
+        """,
+        SearchQuery(keywords=["Backend Developer"], locations=["Israel"], limit=10),
+    )
+
+    assert len(jobs) == 1
+    assert jobs[0].source == "comeet"
+    assert jobs[0].title == "Backend Developer"
+    assert jobs[0].company == "ExampleCo"
 
 
 def test_global_api_adapters_parse_jobs():
