@@ -622,6 +622,11 @@ def cancel_search() -> Dict[str, Any]:
     return payload
 
 
+@app.get("/ping")
+def ping() -> JSONResponse:
+    return JSONResponse({"version": "v2-premium-2025", "design": "white-blue", "ok": True})
+
+
 @app.get("/api/status")
 def status() -> Dict[str, Any]:
     config = load_config()
@@ -1118,6 +1123,7 @@ def css() -> str:
     :root{--white:#fff;--off-white:#f8fafc;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;--navy:#0f172a;--text-body:#374151;--text-muted:#6b7280;--border:#e5e7eb;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;--shadow-sm:0 1px 2px rgba(0,0,0,.06);--shadow-md:0 4px 12px rgba(0,0,0,.08);--shadow-lg:0 12px 40px rgba(0,0,0,.10);--shadow-xl:0 24px 64px rgba(0,0,0,.12);font-family:"Inter","Noto Sans Hebrew",system-ui,-apple-system,sans-serif;color-scheme:light}
     html{scroll-behavior:smooth;font-size:16px}
     body{background:var(--white);color:var(--text-body);line-height:1.6;-webkit-font-smoothing:antialiased}
+    body::after{content:"v2 NEW DESIGN";position:fixed;bottom:10px;left:10px;background:#2563eb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;z-index:9999;pointer-events:none}
     img{max-width:100%;display:block}
     a{color:inherit;text-decoration:none}
     h1{font-size:clamp(32px,5vw,56px);font-weight:800;line-height:1.1;color:var(--navy);letter-spacing:-.03em}
