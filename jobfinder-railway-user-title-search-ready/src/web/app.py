@@ -281,7 +281,7 @@ def root() -> HTMLResponse:
 </html>"""
     return HTMLResponse(
         full_html,
-        headers={{"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}},
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
     )
 
 
