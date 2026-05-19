@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.web.app import app, prepare_new_search_run, search_diagnostics, split_titles, status
+from src.web.app import app, debug_search, prepare_new_search_run, search_diagnostics, split_titles, status
 
 
 def test_home_page_is_branded_jobfinder():
@@ -199,6 +199,33 @@ subscription:
 
     assert payload["active_run"]["run_id"] == "run-1"
     assert payload["records"][0]["source"] == "jobmaster"
+
+
+def test_debug_search_uses_runtime_title(monkeypatch):
+    class FakeEngine:
+        def __init__(self, sources, max_pages, progress_callback):
+            self.progress_callback = progress_callback
+
+        def search_from_plan(self, search_plan):
+            self.progress_callback(
+                {
+                    "status": "source_result",
+                    "source": "fake",
+                    "query": search_plan["queries"][0]["keywords"][0],
+                    "fetched_count": 1,
+                    "accepted_count": 1,
+                }
+            )
+            return []
+
+    monkeypatch.setattr("src.web.app.IsraelSearchEngine", FakeEngine)
+
+    payload = debug_search("Junior Economist", limit=5)
+
+    assert payload["ok"] is True
+    assert payload["runtime_keywords"] == ["Junior Economist"]
+    assert payload["plan_keywords"] == ["Junior Economist"]
+    assert payload["diagnostics"][0]["query"] == "Junior Economist"
 
 
 def test_takbull_webhook_unlocks_subscription(tmp_path, monkeypatch):

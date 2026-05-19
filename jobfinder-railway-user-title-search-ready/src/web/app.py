@@ -11,7 +11,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from main import SearchPlanBuilder
 from src.commands.daily_pipeline import DailyPipeline
+from src.israel_sources.search_engine import IsraelSearchEngine
 
 
 APP_NAME = "JobFinder"
@@ -465,6 +467,66 @@ def search_diagnostics() -> Dict[str, Any]:
     return {
         "active_run": active_search_run(output_dir),
         "records": records,
+    }
+
+
+@app.get("/api/debug-search")
+def debug_search(title: str, limit: int = 10) -> Dict[str, Any]:
+    runtime_keywords = split_titles(title)
+    if not runtime_keywords:
+        return {"ok": False, "error": "missing title", "jobs": [], "diagnostics": []}
+
+    config = load_config()
+    config["search"] = dict(config["search"])
+    config["search"]["keywords"] = runtime_keywords
+    search_plan = SearchPlanBuilder.build(config)
+    search_plan["total_limit"] = max(1, min(int(limit), 25))
+    search_plan["jobs_per_source"] = max(1, min(int(limit), 25))
+    search_plan["max_pages"] = 1
+    search_plan["max_workers"] = 8
+    search_plan["max_tasks"] = 80
+    search_plan["queries"] = [
+        {**query, "limit": search_plan["jobs_per_source"]}
+        for query in search_plan.get("queries", [])
+    ]
+
+    diagnostics = []
+
+    def collect_progress(progress_payload: Dict[str, Any]) -> None:
+        if progress_payload.get("status") == "source_result":
+            diagnostics.append(
+                {
+                    "source": progress_payload.get("source", ""),
+                    "query": progress_payload.get("query", ""),
+                    "fetched_count": progress_payload.get("fetched_count", 0),
+                    "accepted_count": progress_payload.get("accepted_count", 0),
+                }
+            )
+
+    engine = IsraelSearchEngine(
+        sources=search_plan["sources"],
+        max_pages=search_plan["max_pages"],
+        progress_callback=collect_progress,
+    )
+    jobs = engine.search_from_plan(search_plan)
+    return {
+        "ok": True,
+        "requested_title": title,
+        "runtime_keywords": runtime_keywords,
+        "plan_keywords": search_plan.get("keywords", []),
+        "sources": search_plan.get("sources", []),
+        "diagnostics": diagnostics,
+        "jobs": [
+            {
+                "source": job.source,
+                "source_job_id": job.source_job_id,
+                "title": job.title,
+                "company": job.company,
+                "location": job.location,
+                "apply_url": job.apply_url,
+            }
+            for job in jobs
+        ],
     }
 
 
