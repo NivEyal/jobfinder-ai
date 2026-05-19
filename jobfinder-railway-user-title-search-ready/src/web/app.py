@@ -28,29 +28,243 @@ app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 @app.get("/")
 def root() -> HTMLResponse:
     config = load_config()
-    return page(
-        "JobFinder | מציאת עבודה והגשה חכמה",
-        f"""
-        <section class="hero">
+    pay_url = config.get("subscription", {}).get("pay_url", "#")
+    landing_html = f"""
+<!-- NAVBAR -->
+<nav class="site-nav" id="site-nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="JobFinder" /><span>JobFinder</span></a>
+    <ul class="nav-links">
+      <li><a href="#how">איך זה עובד</a></li>
+      <li><a href="{pay_url}">מחירים</a></li>
+      <li><a href="/login">התחברות</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a class="btn btn-primary" href="/onboarding">התחל בחינם</a>
+      <button class="nav-hamburger" id="nav-hamburger"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+  <div class="container"><div class="nav-mobile-menu" id="nav-mobile-menu">
+    <a href="#how">איך זה עובד</a><a href="{pay_url}">מחירים</a>
+    <a href="/login">התחברות</a><a href="/onboarding">התחל בחינם</a>
+  </div></div>
+</nav>
+
+<!-- HERO -->
+<section class="hero-section">
+  <div class="hero-inner">
+    <div class="hero-content reveal">
+      <div class="hero-badge">🤖 AI Job Agent לישראל</div>
+      <h1 class="hero-h1">JobFinder<br>מוצא. מתאים. מגיש.</h1>
+      <p class="hero-sub">AI שמחפש עד 100 משרות מתאימות, מדרג התאמה, ומנהל הגשות — הכל במקום אחד</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary btn-lg" href="/onboarding">התחל ב-2 דקות →</a>
+        <a class="btn btn-ghost btn-lg" href="/dashboard">פתח דשבורד</a>
+      </div>
+      <div class="hero-trust">
+        <span>ללא כרטיס אשראי</span>
+        <span>הגדרה ב-2 דקות</span>
+        <span>AI מגיש רק באישורך</span>
+      </div>
+    </div>
+    <div class="hero-visual reveal">
+      <div class="hero-card-mockup">
+        <div class="mockup-header">
+          <div class="mockup-logo">W</div>
           <div>
-            <span class="eyebrow">AI job agent for Israel</span>
-            <h1>JobFinder<br><span class="gradient">מוצא. מתאים. מגיש.</span></h1>
-            <p>{BRAND_TAGLINE}. חיפוש משרות, דירוג התאמה, Application Inbox ומצב אישור לפני שליחה במקום אחד.</p>
-            <div class="actions">
-              <a class="button primary" href="/onboarding">התחל ב-2 דקות</a>
-              <a class="button secondary" href="/dashboard">פתח דשבורד</a>
-              <a class="button ghost" href="{config['subscription']['pay_url']}">הפעל מנוי</a>
-            </div>
+            <div class="mockup-company">Wix Engineering</div>
+            <div class="mockup-role">Senior Backend Engineer</div>
           </div>
-          <div class="logo-panel"><img src="/assets/brand/jobfinder-logo.png" alt="JobFinder" /></div>
-        </section>
-        <section class="trust">
-          <div>AI לא שולח בלי אישור במצב ברירת המחדל</div>
-          <div>קורות החיים לא מפורסמים לציבור</div>
-          <div>כל פעולה נרשמת בלוג</div>
-        </section>
-        """,
-        landing=True,
+        </div>
+        <div class="mockup-score-row">
+          <div>
+            <div class="mockup-score-label">ציון התאמה</div>
+            <div class="mockup-score-num">94%</div>
+          </div>
+          <span class="badge badge-green">התאמה חזקה</span>
+        </div>
+        <div class="mockup-tags">
+          <span class="mockup-tag">Python</span>
+          <span class="mockup-tag">Node.js</span>
+          <span class="mockup-tag">AWS</span>
+          <span class="mockup-tag">Remote</span>
+        </div>
+        <button class="mockup-apply">הגש מועמדות →</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SOCIAL PROOF -->
+<div class="proof-bar">
+  <div class="proof-inner">
+    <span class="proof-label">משרות נמצאו ב:</span>
+    <div class="proof-logos">
+      <span class="proof-logo linkedin">LinkedIn</span>
+      <span class="proof-logo alljobs">AllJobs</span>
+      <span class="proof-logo drushim">Drushim</span>
+      <span class="proof-logo google">Google Jobs</span>
+      <span class="proof-logo indeed">Indeed</span>
+    </div>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section class="how-section" id="how">
+  <div class="container section-center">
+    <span class="section-label">תהליך פשוט</span>
+    <h2>איך זה עובד?</h2>
+  </div>
+  <div class="steps-row">
+    <div class="step reveal">
+      <div class="step-num">1</div>
+      <div class="step-icon">📋</div>
+      <h3>הגדר פרופיל</h3>
+      <p>תאר את הניסיון שלך, העלה קורות חיים ובחר את הטייטל שאתה מחפש</p>
+    </div>
+    <div class="step reveal">
+      <div class="step-num">2</div>
+      <div class="step-icon">🔍</div>
+      <h3>AI מחפש</h3>
+      <p>סורק עד 100 משרות רלוונטיות ממקורות ישראליים וגלובליים ומדרג לפי התאמה</p>
+    </div>
+    <div class="step reveal">
+      <div class="step-num">3</div>
+      <div class="step-icon">✅</div>
+      <h3>אתה מאשר</h3>
+      <p>AI שולח הגשות רק אחרי אישורך — שמירה מלאה על השליטה שלך</p>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features-section">
+  <div class="container section-center">
+    <span class="section-label">פיצ'רים</span>
+    <h2 style="margin-bottom:48px">הכל במקום אחד</h2>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card reveal">
+      <div class="feature-icon">🎯</div>
+      <h3>דירוג התאמה AI</h3>
+      <p>כל משרה מקבלת ציון התאמה מ-0 עד 100 על בסיס קורות החיים שלך</p>
+    </div>
+    <div class="feature-card reveal">
+      <div class="feature-icon">📥</div>
+      <h3>Application Inbox</h3>
+      <p>כל הגשה עם סטטוס, ציון ופרטי המשרה — במקום אחד מסודר</p>
+    </div>
+    <div class="feature-card reveal">
+      <div class="feature-icon">✋</div>
+      <h3>מצב אישור</h3>
+      <p>AI לא שולח שום דבר בלי האישור שלך — אתה תמיד בשליטה</p>
+    </div>
+    <div class="feature-card reveal">
+      <div class="feature-icon">🔒</div>
+      <h3>פרטיות מלאה</h3>
+      <p>קורות החיים שלך לא מפורסמים לציבור ולא שיתוף עם צדדים שלישיים</p>
+    </div>
+    <div class="feature-card reveal">
+      <div class="feature-icon">📊</div>
+      <h3>לוג פעולות</h3>
+      <p>כל פעולה נרשמת בלוג מפורט — שקיפות מלאה על כל מה שה-AI עשה</p>
+    </div>
+    <div class="feature-card reveal">
+      <div class="feature-icon">🌍</div>
+      <h3>ישראל + גלובלי</h3>
+      <p>סורק Drushim, AllJobs, Jobnet, Remotive, LinkedIn ועוד 10 מקורות</p>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="testimonials-section">
+  <div class="container section-center">
+    <span class="section-label">מה אומרים המשתמשים</span>
+    <h2>מה אומרים המשתמשים שלנו</h2>
+    <p class="section-sub">הצטרפו ל-2,000+ אנשי מקצוע שמצאו עבודה עם JobFinder</p>
+  </div>
+  <div class="testimonials-grid">
+    <div class="t-card reveal">
+      <div class="t-stars">★★★★★</div>
+      <p class="t-text">"תוך שבועיים קיבלתי 4 ראיונות. ה-AI מצא משרות שלא ידעתי שהן קיימות ושלח בשמי רק למשרות שאישרתי."</p>
+      <div class="t-author">
+        <img class="t-avatar" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=96&h=96&fit=crop&crop=face" alt="דוד כהן" />
+        <div><div class="t-name">דוד כהן</div><div class="t-role">Backend Developer • Tel Aviv</div></div>
+      </div>
+    </div>
+    <div class="t-card reveal">
+      <div class="t-stars">★★★★★</div>
+      <p class="t-text">"חיפשתי עבודה 3 חודשים. עם JobFinder מצאתי תוך 3 שבועות. הציון התאמה עזר לי להתמקד בהגשות עם סיכוי גבוה."</p>
+      <div class="t-author">
+        <img class="t-avatar" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=96&h=96&fit=crop&crop=face" alt="מיכל לוי" />
+        <div><div class="t-name">מיכל לוי</div><div class="t-role">Product Manager • Herzliya</div></div>
+      </div>
+    </div>
+    <div class="t-card reveal">
+      <div class="t-stars">★★★★★</div>
+      <p class="t-text">"כלי מדהים. חסך לי שעות של חיפוש ידני. אוהב שה-AI לא שולח בלי אישורי — זה נותן לי שקט נפשי מלא."</p>
+      <div class="t-author">
+        <img class="t-avatar" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=96&h=96&fit=crop&crop=face" alt="אמיר שמיר" />
+        <div><div class="t-name">אמיר שמיר</div><div class="t-role">Full Stack Engineer • Remote</div></div>
+      </div>
+    </div>
+    <div class="t-card reveal">
+      <div class="t-stars">★★★★★</div>
+      <p class="t-text">"ציון ההתאמה הוא גאוני. הבנתי בדיוק אילו משרות מתאימות לי ואילו לא. חסך לי הגשות מיותרות."</p>
+      <div class="t-author">
+        <img class="t-avatar" src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=96&h=96&fit=crop&crop=face" alt="שירה אדר" />
+        <div><div class="t-name">שירה אדר</div><div class="t-role">Data Analyst • Be'er Sheva</div></div>
+      </div>
+    </div>
+    <div class="t-card reveal">
+      <div class="t-stars">★★★★★</div>
+      <p class="t-text">"JobFinder שלח 12 הגשות בשמי תוך יום אחד — כולן מאושרות על ידי. קיבלתי עבודה מהגשה השישית."</p>
+      <div class="t-author">
+        <img class="t-avatar" src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=96&h=96&fit=crop&crop=face" alt="רון בן דוד" />
+        <div><div class="t-name">רון בן דוד</div><div class="t-role">DevOps Engineer • Haifa</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA BANNER -->
+<section class="cta-section">
+  <div class="container">
+    <h2>מוכן להתחיל?</h2>
+    <p>הצטרף לאלפי מועמדים שמצאו עבודה עם JobFinder. הגדרה ב-2 דקות, ללא כרטיס אשראי.</p>
+    <a class="btn btn-white btn-lg" href="/onboarding">התחל בחינם →</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <a class="footer-brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="" /><span>JobFinder</span></a>
+    <ul class="footer-links">
+      <li><a href="#how">איך זה עובד</a></li>
+      <li><a href="{pay_url}">מחירים</a></li>
+      <li><a href="/dashboard">Dashboard</a></li>
+      <li><a href="/onboarding">התחל</a></li>
+    </ul>
+    <span class="footer-copy">&copy; 2025 JobFinder. כל הזכויות שמורות.</span>
+  </div>
+</footer>
+
+<script>
+  // Navbar scroll
+  var nav = document.getElementById('site-nav');
+  window.addEventListener('scroll', function(){{nav.classList.toggle('scrolled', window.scrollY>8);}},{{passive:true}});
+  // Hamburger
+  var hbtn=document.getElementById('nav-hamburger'), hmenu=document.getElementById('nav-mobile-menu');
+  if(hbtn&&hmenu)hbtn.addEventListener('click',function(){{hbtn.classList.toggle('open');hmenu.classList.toggle('open');}});
+  // Scroll reveal
+  var revealEls=document.querySelectorAll('.reveal');
+  if(revealEls.length){{var io=new IntersectionObserver(function(e){{e.forEach(function(entry,i){{if(entry.isIntersecting){{setTimeout(function(){{entry.target.classList.add('visible');}},i*60);io.unobserve(entry.target);}}}});}},({{threshold:0.1}}));revealEls.forEach(function(el){{io.observe(el);}});}}
+</script>"""
+    return HTMLResponse(
+        landing_html,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
     )
 
 
@@ -565,26 +779,55 @@ async def takbull_webhook(request: Request) -> JSONResponse:
 
 
 def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
-    nav = "" if landing else "<nav><a href='/dashboard'>Dashboard</a><a href='/jobs'>Jobs</a><a href='/inbox'>Inbox</a><a href='/settings'>Settings</a><a href='/upload-cv'>Resume</a></nav>"
+    if landing:
+        header_html = ""
+        footer_html = ""
+    else:
+        header_html = f"""
+  <nav class="site-nav" id="site-nav">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="JobFinder" /><span>JobFinder</span></a>
+      <ul class="nav-links">
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/jobs">Jobs</a></li>
+        <li><a href="/inbox">Inbox</a></li>
+        <li><a href="/settings">Settings</a></li>
+        <li><a href="/upload-cv">Resume</a></li>
+      </ul>
+      <div class="nav-actions">
+        <a class="btn btn-primary btn-sm" href="/onboarding">הרץ עכשיו</a>
+        <button class="nav-hamburger" id="nav-hamburger"><span></span><span></span><span></span></button>
+      </div>
+    </div>
+    <div class="container"><div class="nav-mobile-menu" id="nav-mobile-menu">
+      <a href="/dashboard">Dashboard</a><a href="/jobs">Jobs</a>
+      <a href="/inbox">Inbox</a><a href="/settings">Settings</a><a href="/upload-cv">Resume</a>
+    </div></div>
+  </nav>"""
+        footer_html = f"""
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a class="footer-brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="" /><span>JobFinder</span></a>
+      <ul class="footer-links"><li><a href="/">בית</a></li><li><a href="/dashboard">Dashboard</a></li><li><a href="/onboarding">התחל</a></li></ul>
+      <span class="footer-copy">&copy; 2025 JobFinder. כל הזכויות שמורות.</span>
+    </div>
+  </footer>"""
     html = f"""<!doctype html>
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>{title}</title>
   <meta name="description" content="JobFinder מוצא משרות, מדרג התאמה ומנהל הגשות עבודה בישראל." />
   <link rel="icon" href="/assets/brand/jobfinder-logo.png" />
   <style>{css()}</style>
 </head>
 <body>
-  <div class="shell">
-    <header>
-      <a class="brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="JobFinder logo" /><span>JobFinder</span></a>
-      {nav}
-    </header>
-    <main>{body}</main>
-    <footer>JobFinder | {BRAND_TAGLINE}</footer>
-  </div>
+  {header_html}
+  {body}
+  {footer_html}
   <div id="loading-overlay" class="loading-overlay" hidden>
     <div class="loading-card">
       <div class="spinner"></div>
@@ -900,7 +1143,215 @@ def progress_percent(value: str) -> int:
 
 def css() -> str:
     return """
-    :root { color-scheme: light; --ink:#0b1736; --muted:#566174; --blue:#128ff2; --violet:#7c2df2; --line:#dbe5f2; --bg:#f7f9fc; --ok:#0f9f6e; --warn:#b7791f; font-family: Arial, "Noto Sans Hebrew", sans-serif; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--white:#fff;--off-white:#f8fafc;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;--navy:#0f172a;--text-body:#374151;--text-muted:#6b7280;--border:#e5e7eb;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;--shadow-sm:0 1px 2px rgba(0,0,0,.06);--shadow-md:0 4px 12px rgba(0,0,0,.08);--shadow-lg:0 12px 40px rgba(0,0,0,.10);--shadow-xl:0 24px 64px rgba(0,0,0,.12);font-family:"Inter","Noto Sans Hebrew",system-ui,-apple-system,sans-serif;color-scheme:light}
+    html{scroll-behavior:smooth;font-size:16px}
+    body{background:var(--white);color:var(--text-body);line-height:1.6;-webkit-font-smoothing:antialiased}
+    img{max-width:100%;display:block}
+    a{color:inherit;text-decoration:none}
+    h1{font-size:clamp(32px,5vw,56px);font-weight:800;line-height:1.1;color:var(--navy);letter-spacing:-.03em}
+    h2{font-size:clamp(28px,3.5vw,40px);font-weight:700;line-height:1.2;color:var(--navy);letter-spacing:-.02em}
+    h3{font-size:20px;font-weight:700;color:var(--navy)}
+    p{font-size:16px;line-height:1.7;color:var(--text-body)}
+    /* Layout */
+    .container{width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    section{padding:80px 0}
+    /* Navbar */
+    .site-nav{position:sticky;top:0;z-index:1000;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border-bottom:1px solid transparent;transition:border-color .2s,box-shadow .2s}
+    .site-nav.scrolled{border-color:var(--border);box-shadow:var(--shadow-sm)}
+    .nav-inner{display:flex;align-items:center;justify-content:space-between;gap:24px;height:68px;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .nav-brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:800;color:var(--navy);flex-shrink:0}
+    .nav-brand img{width:34px;height:34px;object-fit:contain}
+    .nav-links{display:flex;align-items:center;gap:6px;list-style:none}
+    .nav-links a{padding:8px 14px;border-radius:8px;font-size:15px;font-weight:500;color:var(--text-body);transition:background .15s,color .15s}
+    .nav-links a:hover{background:var(--gray-100);color:var(--navy)}
+    .nav-actions{display:flex;align-items:center;gap:10px}
+    .nav-hamburger{display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:8px;border-radius:8px}
+    .nav-hamburger span{display:block;width:22px;height:2px;background:var(--navy);border-radius:2px;transition:transform .25s,opacity .15s}
+    .nav-hamburger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+    .nav-hamburger.open span:nth-child(2){opacity:0}
+    .nav-hamburger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+    .nav-mobile-menu{display:none;flex-direction:column;gap:4px;padding:16px 0;border-top:1px solid var(--border)}
+    .nav-mobile-menu.open{display:flex}
+    .nav-mobile-menu a{padding:12px 20px;font-size:16px;font-weight:500;color:var(--text-body);border-radius:8px;transition:background .15s}
+    .nav-mobile-menu a:hover{background:var(--gray-50)}
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:none;text-decoration:none;transition:all .2s;white-space:nowrap;line-height:1}
+    .btn:disabled{opacity:.6;cursor:wait}
+    .btn-primary{background:var(--blue-600);color:#fff;box-shadow:0 2px 8px rgba(37,99,235,.3)}
+    .btn-primary:hover{background:var(--blue-700);box-shadow:0 4px 16px rgba(37,99,235,.4);transform:translateY(-1px)}
+    .btn-ghost{background:transparent;color:var(--text-body);border:1.5px solid var(--border)}
+    .btn-ghost:hover{border-color:var(--blue-600);color:var(--blue-600);background:var(--blue-50)}
+    .btn-lg{padding:15px 28px;font-size:17px}
+    .btn-white{background:#fff;color:var(--blue-600);font-weight:700}
+    .btn-white:hover{background:var(--off-white);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
+    .button,.button:link{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:1.5px solid transparent;text-decoration:none;transition:all .2s;white-space:nowrap;line-height:1}
+    button:not(.nav-hamburger){display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:1.5px solid transparent;transition:all .2s;white-space:nowrap;line-height:1}
+    button:disabled{opacity:.6;cursor:wait}
+    .primary{background:var(--blue-600);color:#fff;border-color:var(--blue-600)}
+    .primary:hover{background:var(--blue-700);border-color:var(--blue-700);transform:translateY(-1px)}
+    .secondary{background:#fff;color:var(--navy);border-color:var(--border)}
+    .secondary:hover{border-color:var(--blue-600);color:var(--blue-600)}
+    .ghost{background:transparent;color:var(--text-body);border-color:var(--border)}
+    .ghost:hover{border-color:var(--blue-600);color:var(--blue-600)}
+    /* Badges */
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:13px;font-weight:600}
+    .badge-blue{background:var(--blue-100);color:var(--blue-600)}
+    .badge-green{background:#d1fae5;color:#065f46}
+    .badge-orange{background:#fef3c7;color:#92400e}
+    .badge-gray{background:var(--gray-100);color:var(--text-muted)}
+    .score-high{background:#d1fae5;color:#065f46}
+    .score-mid{background:#fef3c7;color:#92400e}
+    .score-low{background:#fee2e2;color:#991b1b}
+    /* Hero */
+    .hero-section{padding:96px 0 80px;overflow:hidden}
+    .hero-inner{display:grid;grid-template-columns:1fr 480px;align-items:center;gap:80px;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .hero-badge{display:inline-flex;align-items:center;gap:8px;background:var(--blue-50);border:1px solid var(--blue-100);color:var(--blue-600);border-radius:999px;padding:6px 14px;font-size:14px;font-weight:600;margin-bottom:24px}
+    .hero h1{margin-bottom:20px}
+    .hero-sub{font-size:18px;color:var(--text-muted);margin-bottom:36px;max-width:560px}
+    .hero-ctas{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+    .hero-trust{display:flex;align-items:center;gap:20px;flex-wrap:wrap;color:var(--text-muted);font-size:14px;font-weight:500}
+    .hero-trust span::before{content:"✓ ";color:var(--success);font-weight:700}
+    /* Hero card mockup */
+    .hero-visual{display:flex;justify-content:center;align-items:center;position:relative}
+    .hero-card-mockup{background:#fff;border:1px solid var(--border);border-radius:24px;padding:28px;box-shadow:var(--shadow-xl);width:100%;max-width:360px;animation:float 3s ease-in-out infinite alternate}
+    @keyframes float{from{transform:translateY(0)}to{transform:translateY(-12px)}}
+    .mockup-header{display:flex;align-items:center;gap:14px;margin-bottom:20px}
+    .mockup-logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#667eea,#764ba2);display:grid;place-items:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
+    .mockup-company{font-weight:700;color:var(--navy);font-size:16px}
+    .mockup-role{font-size:13px;color:var(--text-muted)}
+    .mockup-score-row{display:flex;align-items:center;justify-content:space-between;background:var(--gray-50);border-radius:12px;padding:16px;margin-bottom:16px}
+    .mockup-score-num{font-size:30px;font-weight:800;color:var(--success)}
+    .mockup-score-label{font-size:13px;color:var(--text-muted);font-weight:500}
+    .mockup-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px}
+    .mockup-tag{background:var(--blue-50);color:var(--blue-600);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
+    .mockup-apply{width:100%;background:var(--blue-600);color:#fff;border:none;border-radius:8px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s}
+    .mockup-apply:hover{background:var(--blue-700)}
+    /* Proof bar */
+    .proof-bar{padding:28px 0;background:var(--gray-50);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+    .proof-inner{display:flex;align-items:center;gap:32px;flex-wrap:wrap;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .proof-label{font-size:14px;font-weight:600;color:var(--text-muted);white-space:nowrap}
+    .proof-logos{display:flex;align-items:center;gap:28px;flex-wrap:wrap}
+    .proof-logo{font-size:15px;font-weight:700;opacity:.5;transition:opacity .2s;cursor:default}
+    .proof-logo:hover{opacity:1}
+    .proof-logo.linkedin{color:#0077b5}.proof-logo.alljobs{color:#e53935}.proof-logo.drushim{color:#1565c0}.proof-logo.google{color:#34a853}.proof-logo.indeed{color:#2164f3}
+    /* How it works */
+    .how-section{background:#fff}
+    .section-center{text-align:center}
+    .section-center h2{margin-bottom:56px}
+    .steps-row{display:grid;grid-template-columns:repeat(3,1fr);gap:0;position:relative;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .steps-row::before{content:"";position:absolute;top:28px;left:calc(33.33% - 8px);right:calc(33.33% - 8px);height:2px;background:linear-gradient(90deg,var(--blue-100),var(--blue-600),var(--blue-100));z-index:0}
+    .step{text-align:center;padding:0 32px;position:relative;z-index:1}
+    .step-num{width:56px;height:56px;border-radius:50%;background:var(--blue-600);color:#fff;font-size:20px;font-weight:800;display:inline-grid;place-items:center;margin:0 auto 20px;box-shadow:0 0 0 6px var(--blue-50)}
+    .step-icon{font-size:28px;margin-bottom:14px}
+    .step h3{margin-bottom:10px;font-size:18px}
+    .step p{font-size:15px;color:var(--text-muted);max-width:240px;margin-inline:auto}
+    /* Features */
+    .features-section{background:var(--off-white);padding:80px 0}
+    .features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .feature-card{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:28px 24px;transition:border-color .2s,box-shadow .2s,transform .2s}
+    .feature-card:hover{border-color:var(--blue-600);box-shadow:var(--shadow-md);transform:translateY(-3px)}
+    .feature-icon{font-size:32px;margin-bottom:16px}
+    .feature-card h3{font-size:17px;margin-bottom:8px}
+    .feature-card p{font-size:15px;color:var(--text-muted)}
+    /* Testimonials */
+    .testimonials-section{background:#fff;padding:80px 0}
+    .testimonials-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .t-card{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:24px;transition:box-shadow .2s,transform .2s}
+    .t-card:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+    .t-stars{color:#f59e0b;font-size:14px;margin-bottom:12px;letter-spacing:2px}
+    .t-text{font-size:15px;color:var(--text-body);line-height:1.65;margin-bottom:18px;font-style:italic}
+    .t-author{display:flex;align-items:center;gap:12px}
+    .t-avatar{width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--border);flex-shrink:0}
+    .t-name{font-weight:700;font-size:14px;color:var(--navy)}
+    .t-role{font-size:13px;color:var(--text-muted)}
+    /* CTA section */
+    .cta-section{background:var(--blue-600);padding:80px 0;text-align:center}
+    .cta-section h2{color:#fff;margin-bottom:16px}
+    .cta-section p{color:rgba(255,255,255,.8);margin-bottom:36px;font-size:18px;max-width:560px;margin-inline:auto}
+    /* Section helpers */
+    .section-label{display:block;font-size:13px;font-weight:700;color:var(--blue-600);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;text-align:center}
+    .section-sub{text-align:center;color:var(--text-muted);margin-bottom:52px;font-size:17px}
+    /* Site footer */
+    .site-footer{background:var(--navy);color:rgba(255,255,255,.7);padding:48px 0 32px}
+    .footer-inner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:24px;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    .footer-brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:800;font-size:18px}
+    .footer-brand img{width:28px;height:28px;object-fit:contain;filter:brightness(2)}
+    .footer-links{display:flex;gap:24px;font-size:14px;list-style:none}
+    .footer-links a{color:rgba(255,255,255,.6);transition:color .15s}
+    .footer-links a:hover{color:#fff}
+    .footer-copy{font-size:13px}
+    /* App pages */
+    .app-shell{min-height:100vh;background:var(--off-white)}
+    .app-topbar{background:#fff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+    .app-topbar-inner{display:flex;align-items:center;justify-content:space-between;height:60px;gap:16px;width:min(1200px,calc(100% - 48px));margin-inline:auto}
+    .app-brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;color:var(--navy)}
+    .app-brand img{width:30px;height:30px;object-fit:contain}
+    .app-nav{display:flex;align-items:center;gap:4px}
+    .app-nav a{padding:7px 14px;border-radius:8px;font-size:14px;font-weight:600;color:var(--text-muted);transition:background .15s,color .15s}
+    .app-nav a:hover{background:var(--gray-100);color:var(--navy)}
+    .app-nav a.active{background:var(--blue-50);color:var(--blue-600)}
+    .app-layout{display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start;max-width:1200px;margin:32px auto;padding:0 24px}
+    .side{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px;position:sticky;top:80px;display:grid;gap:4px}
+    .side a{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;font-size:14px;font-weight:600;color:var(--text-muted);transition:background .15s,color .15s}
+    .side a:hover{background:var(--gray-50);color:var(--navy)}
+    .side a.active{background:var(--blue-50);color:var(--blue-600)}
+    .workspace{min-width:0}
+    .panel{background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px}
+    .metrics,.status{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+    .metric{background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px}
+    .metric span{display:block;font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+    .metric strong{font-size:28px;font-weight:800;color:var(--navy)}
+    .job-list{display:grid;gap:12px}
+    .job-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px 24px;display:grid;grid-template-columns:1fr 80px auto;align-items:center;gap:20px;transition:border-color .2s,box-shadow .2s}
+    .job-card:hover{border-color:var(--blue-600);box-shadow:var(--shadow-sm)}
+    .job-card-title{font-weight:700;font-size:16px;color:var(--navy);margin-bottom:4px}
+    .job-card-meta{display:flex;flex-wrap:wrap;gap:12px;font-size:14px;color:var(--text-muted)}
+    .score{text-align:center}
+    .score strong{display:block;font-size:28px;font-weight:800;color:var(--blue-600)}
+    .score span{font-size:12px;color:var(--text-muted)}
+    .progress{height:8px;background:var(--gray-100);border-radius:999px;overflow:hidden}
+    .progress span{display:block;height:100%;background:var(--blue-600);border-radius:999px;transition:width .4s}
+    .progress-card{margin-bottom:20px}
+    form{display:grid;gap:14px}
+    label{font-size:14px;font-weight:600;color:var(--text-body)}
+    input,select{width:100%;border:1.5px solid var(--border);border-radius:8px;padding:11px 14px;font-size:15px;color:var(--navy);background:#fff;transition:border-color .15s,box-shadow .15s;outline:none}
+    input:focus,select:focus{border-color:var(--blue-600);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+    .dropzone{border:2px dashed var(--border);border-radius:12px;padding:32px;text-align:center;transition:border-color .2s,background .2s}
+    .dropzone:hover{border-color:var(--blue-600);background:var(--blue-50)}
+    .search-inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .search-inline input{min-width:min(360px,100%);width:auto;flex:1}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--border);text-align:right;padding:12px 16px;font-size:14px}
+    th{font-weight:700;font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}
+    tr:hover td{background:var(--gray-50)}
+    .insights li{color:var(--text-body);font-size:14px;line-height:1.6;padding:10px 0;border-bottom:1px solid var(--border);list-style:none}
+    .insights li:last-child{border:0}
+    .insights li b{color:var(--blue-600)}
+    .feed div{display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;color:var(--text-muted);font-size:14px}
+    .feed div:hover{background:var(--gray-50)}
+    .timeline{display:grid;gap:12px}
+    .timeline div{display:flex;gap:14px;align-items:flex-start;padding:10px;border-radius:8px}
+    .timeline div:hover{background:var(--gray-50)}
+    .timeline b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--blue-600);color:#fff;font-size:13px;font-weight:800;flex-shrink:0}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 20px}
+    .chips span{background:var(--blue-50);color:var(--blue-600);border-radius:999px;padding:5px 12px;font-weight:600;font-size:13px;border:1px solid var(--blue-100)}
+    .trust{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+    .trust div{background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px 16px;color:var(--text-muted);font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px}
+    .trust div::before{content:"✓";color:var(--success);font-weight:800}
+    .eyebrow{display:inline-block;color:var(--blue-600);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+    .gradient{background:linear-gradient(90deg,var(--blue-600),#7c3aed);-webkit-background-clip:text;color:transparent}
+    .grid{display:grid;gap:16px}
+    .two{grid-template-columns:repeat(2,1fr)}
+    .three{grid-template-columns:repeat(3,1fr)}
+    .narrow{max-width:640px}
+    .onboarding{display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
+    .empty-state{background:#fff;border:1px solid var(--border);border-radius:12px;padding:64px 32px;text-align:center}
+    .empty-state h2{margin-bottom:10px}
+    .empty-state p{margin-bottom:24px;color:var(--text-muted)}
+    .loading-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);z-index:200;display:grid;place-items:center;padding:24px}
+    .loading-overlay[hidden]{display:none}
     body { margin:0; background:radial-gradient(circle at top,#fff 0,var(--bg) 62%); color:var(--ink); }
     .shell { min-height:100vh; display:grid; grid-template-rows:auto 1fr auto; }
     header, main, footer { width:min(1180px, calc(100% - 32px)); margin:0 auto; }
@@ -957,18 +1408,54 @@ def css() -> str:
     th, td { border-bottom:1px solid var(--line); text-align:right; padding:12px; }
     footer { padding:24px 0; color:var(--muted); border-top:1px solid var(--line); margin-top:42px; }
     .loading-overlay { position:fixed; inset:0; background:rgba(11,23,54,.42); z-index:50; display:grid; place-items:center; padding:24px; }
-    .loading-overlay[hidden] { display:none; }
-    .loading-card { width:min(460px,100%); background:#fff; border:1px solid var(--line); border-radius:8px; padding:24px; text-align:center; box-shadow:0 24px 80px rgba(11,23,54,.22); }
-    .loading-card strong { display:block; font-size:22px; margin:14px 0 8px; }
-    .loading-card span { color:var(--muted); line-height:1.5; }
-    .loading-card small { display:block; color:var(--muted); margin-top:10px; }
-    .loading-card button { margin-top:16px; }
-    .loading-progress { height:12px; background:#edf2f7; border-radius:999px; overflow:hidden; margin-top:16px; }
-    .loading-progress span { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--blue),var(--violet)); transition:width .35s ease; }
-    .spinner { width:42px; height:42px; border-radius:50%; border:4px solid #dbe5f2; border-top-color:var(--blue); margin:0 auto; animation:spin .9s linear infinite; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-    @media (max-width:900px) { .hero,.two,.onboarding,.app-layout { grid-template-columns:1fr; } .metrics,.status,.trust { grid-template-columns:1fr 1fr; } .side { position:static; grid-template-columns:repeat(3,1fr); } .job-card { grid-template-columns:1fr; } }
-    @media (max-width:560px) { .metrics,.status,.trust,.side { grid-template-columns:1fr; } header { align-items:flex-start; flex-direction:column; } }
+    .loading-overlay[hidden]{display:none}
+    .loading-card{width:min(480px,100%);background:#fff;border:1px solid var(--border);border-radius:16px;padding:36px;text-align:center;box-shadow:var(--shadow-xl)}
+    .loading-card strong{display:block;font-size:19px;font-weight:700;color:var(--navy);margin:16px 0 8px}
+    .loading-card span{color:var(--text-muted);font-size:15px}
+    .loading-card small{display:block;color:var(--text-muted);font-size:13px;margin-top:8px}
+    .loading-progress{height:6px;background:var(--gray-100);border-radius:999px;overflow:hidden;margin-top:20px}
+    .loading-progress span{display:block;height:100%;width:0;background:var(--blue-600);border-radius:999px;transition:width .35s}
+    .spinner{width:44px;height:44px;border-radius:50%;border:3px solid var(--gray-100);border-top-color:var(--blue-600);margin:0 auto;animation:spin .8s linear infinite}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px}
+    .actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+    .logo-panel{display:grid;place-items:center}
+    .logo-panel img{width:min(100%,380px);height:auto}
+    .hero{display:grid;grid-template-columns:1fr minmax(260px,420px);align-items:center;gap:48px;padding:54px 0 36px;width:min(1160px,calc(100% - 48px));margin-inline:auto}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes float{from{transform:translateY(0)}to{transform:translateY(-12px)}}
+    @media(max-width:960px){
+      section{padding:56px 0}
+      .hero-section{padding:64px 0 48px}
+      .hero-inner,.hero{grid-template-columns:1fr;gap:48px}
+      .hero-visual{order:-1}
+      .hero-card-mockup{max-width:320px;margin-inline:auto}
+      .steps-row::before{display:none}
+      .steps-row{grid-template-columns:1fr;gap:32px}
+      .step{text-align:right;display:flex;gap:20px;align-items:flex-start;padding:0}
+      .step-num{margin:0;flex-shrink:0}
+      .step-icon{display:none}
+      .features-grid{grid-template-columns:repeat(2,1fr)}
+      .testimonials-grid{grid-template-columns:1fr}
+      .app-layout{grid-template-columns:1fr;margin:16px auto}
+      .side{position:static;grid-template-columns:repeat(3,1fr)}
+      .side a{justify-content:center}
+      .metrics,.status,.trust{grid-template-columns:repeat(2,1fr)}
+      .job-card{grid-template-columns:1fr}
+      .nav-links,.nav-actions .btn-primary{display:none}
+      .nav-hamburger{display:flex}
+      .proof-inner,.proof-logos{justify-content:center}
+      .two,.onboarding{grid-template-columns:1fr}
+      .footer-inner{flex-direction:column;text-align:center}
+      .footer-links{justify-content:center}
+    }
+    @media(max-width:560px){
+      h1{font-size:30px}
+      .metrics,.status,.trust,.side{grid-template-columns:1fr}
+      .features-grid{grid-template-columns:1fr}
+      .hero-trust{flex-direction:column;gap:10px}
+    }
+    .reveal{opacity:0;transform:translateY(20px);transition:opacity .6s,transform .6s}
+    .reveal.visible{opacity:1;transform:translateY(0)}
     """
 
 
