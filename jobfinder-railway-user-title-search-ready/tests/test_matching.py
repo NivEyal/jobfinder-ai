@@ -63,6 +63,76 @@ def test_job_matcher_recommended_filters_by_score():
     assert results[0].score >= 65
 
 
+def test_rule_based_matcher_boosts_exact_title_match():
+    config = {
+        "search": {
+            "keywords": ["כלכלן מתחיל"],
+            "keyword_aliases": {
+                "Junior Economist": [
+                    "כלכלן",
+                    "כלכלן מתחיל",
+                    "כלכלן/ית מתחיל/ה",
+                    "אנליסט מתחיל",
+                ]
+            },
+            "remote_types": ["remote", "hybrid", "onsite"],
+            "employment_types": ["full_time", "part_time", "contract"],
+            "seniority": ["entry", "junior", "mid"],
+            "years_experience": {"min": 0, "max": 3},
+        },
+        "filters": {"include": {"must_have_keywords": [], "nice_to_have_keywords": []}, "exclude": {"keywords": []}},
+        "matching": {"provider": "rule_based", "strong_match_score": 80, "possible_match_score": 60},
+    }
+    job = IsraeliJob(
+        source="jobmaster",
+        source_job_id="eco-1",
+        title="כלכלן/ית מתחיל/ה למחלקת כספים",
+        company="Example",
+        location="תל אביב",
+        description="Excel, דוחות ובקרה תקציבית.",
+        apply_url="https://example.com",
+        apply_email=None,
+        apply_method="external_url",
+        posted_at=None,
+    ).to_job(normalized_output_language="he")
+
+    result = RuleBasedMatcher(config).match(job, "בוגר כלכלה עם Excel ויכולת אנליטית")
+
+    assert result.score >= 80
+    assert result.verdict == "strong_match"
+
+
+def test_rule_based_matcher_does_not_score_resume_only_keyword_as_match():
+    config = {
+        "search": {
+            "keywords": ["כלכלן מתחיל"],
+            "keyword_aliases": {},
+            "remote_types": ["remote", "hybrid", "onsite"],
+            "employment_types": ["full_time", "part_time", "contract"],
+            "seniority": ["entry", "junior", "mid"],
+            "years_experience": {"min": 0, "max": 3},
+        },
+        "filters": {"include": {"must_have_keywords": [], "nice_to_have_keywords": []}, "exclude": {"keywords": []}},
+        "matching": {"provider": "rule_based", "strong_match_score": 80, "possible_match_score": 60},
+    }
+    job = IsraeliJob(
+        source="remotive",
+        source_job_id="sales-1",
+        title="Inside Sales Contractor",
+        company="Example",
+        location="Remote",
+        description="Sales calls and pipeline ownership.",
+        apply_url="https://example.com",
+        apply_email=None,
+        apply_method="external_url",
+        posted_at=None,
+    ).to_job(normalized_output_language="en")
+
+    result = RuleBasedMatcher(config).match(job, "כלכלן מתחיל עם Excel")
+
+    assert result.score < 60
+
+
 def test_openai_response_helpers_extract_json_text():
     response = {"output": [{"content": [{"type": "output_text", "text": "```json\n{\"score\": 70}\n```"}]}]}
 

@@ -44,7 +44,8 @@ class RuleBasedMatcher:
         job_text = build_job_text(job)
         job_text_lower = job_text.lower()
         job_tokens = tokenize(job_text)
-        combined_tokens = job_tokens | resume_tokens
+        title_text_lower = (job.title or "").lower()
+        title_tokens = tokenize(job.title or "")
 
         score = 35
         reasons: List[str] = []
@@ -53,7 +54,7 @@ class RuleBasedMatcher:
 
         matched_config_keywords = [
             kw for kw in self._preferred_keywords
-            if _keyword_matches_fast(kw, job_text_lower, job_tokens, combined_tokens)
+            if _keyword_matches_fast(kw, job_text_lower, job_tokens)
         ]
         if matched_config_keywords:
             keyword_points = min(25, 8 + len(matched_config_keywords) * 4)
@@ -61,14 +62,24 @@ class RuleBasedMatcher:
             matched_keywords.extend(matched_config_keywords[:12])
             reasons.append(f"Matched preferred keywords: {', '.join(matched_config_keywords[:5])}")
 
+        title_matches = [
+            kw for kw in self._preferred_keywords
+            if _keyword_matches_fast(kw, title_text_lower, title_tokens)
+        ]
+        if title_matches:
+            title_points = 28 if any(len(tokenize(keyword)) >= 2 for keyword in title_matches) else 18
+            score += title_points
+            matched_keywords.extend(title_matches[:8])
+            reasons.append(f"Title matches requested role: {', '.join(title_matches[:3])}")
+
         resume_overlap = job_tokens.intersection(resume_tokens)
         if resume_overlap:
-            overlap_points = min(20, len(resume_overlap) * 2)
+            overlap_points = min(12, len(resume_overlap) * 2)
             score += overlap_points
             reasons.append(f"Resume overlaps with {len(resume_overlap)} job terms")
 
         for keyword in self._must_have:
-            if not _keyword_matches_fast(keyword, job_text_lower, job_tokens, combined_tokens):
+            if not _keyword_matches_fast(keyword, job_text_lower, job_tokens):
                 score -= 18
                 missing_requirements.append(keyword)
 
@@ -145,18 +156,18 @@ def tokenize(text: str) -> Set[str]:
     return {token.lower() for token in TOKEN_RE.findall(text or "") if len(token) > 1}
 
 
-def _keyword_matches_fast(keyword: str, job_text_lower: str, job_tokens: Set[str], combined_tokens: Set[str]) -> bool:
+def _keyword_matches_fast(keyword: str, job_text_lower: str, job_tokens: Set[str]) -> bool:
     lowered = (keyword or "").lower().strip()
     if not lowered:
         return False
     if lowered in job_text_lower:
         return True
     keyword_tokens = tokenize(lowered)
-    return bool(keyword_tokens and keyword_tokens.issubset(combined_tokens))
+    return bool(keyword_tokens and keyword_tokens.issubset(job_tokens))
 
 
 def keyword_matches(keyword: str, job_text: str, job_tokens: Set[str], resume_tokens: Set[str]) -> bool:
-    return _keyword_matches_fast(keyword, job_text.lower(), job_tokens, job_tokens | resume_tokens)
+    return _keyword_matches_fast(keyword, job_text.lower(), job_tokens)
 
 
 def expand_config_keywords(keywords: Iterable[str], aliases: Dict[str, List[str]], extras: Iterable[str]) -> List[str]:

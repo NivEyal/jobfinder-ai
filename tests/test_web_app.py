@@ -251,7 +251,8 @@ def test_debug_search_uses_runtime_title(monkeypatch):
 
     assert payload["ok"] is True
     assert payload["runtime_keywords"] == ["Junior Economist"]
-    assert payload["plan_keywords"] == ["Junior Economist"]
+    assert payload["plan_keywords"][0] == "Junior Economist"
+    assert "Economist" in payload["plan_keywords"]
     assert payload["diagnostics"][0]["query"] == "Junior Economist"
 
 
