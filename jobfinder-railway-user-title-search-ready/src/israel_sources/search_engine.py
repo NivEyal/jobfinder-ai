@@ -1,4 +1,6 @@
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import re
+from html import unescape
 from typing import Any, Callable, Dict, Iterable, List
 
 from src.israel_sources.base import SearchQuery
@@ -26,33 +28,21 @@ class IsraelSearchEngine:
                 adapter.max_pages = max_pages
 
     def search(self, keywords: List[str], locations: List[str], limit: int = 25) -> List[IsraeliJob]:
-        from concurrent.futures import as_completed as _as_completed
         query = SearchQuery(keywords=keywords, locations=locations, limit=limit)
         jobs: List[IsraeliJob] = []
-        seen: set = set()
-
-        def _search_one(adapter):
+        for adapter in self.adapters:
             try:
-                return adapter.search(query)
+                jobs.extend(adapter.search(query))
             except Exception:
-                return []
-
-        with ThreadPoolExecutor(max_workers=12) as executor:
-            futures = {executor.submit(_search_one, adapter): adapter for adapter in self.adapters}
-            for future in _as_completed(futures):
-                for job in future.result():
-                    key = (job.source, job.source_job_id)
-                    if key not in seen:
-                        seen.add(key)
-                        jobs.append(job)
-                        if len(jobs) >= limit:
-                            return jobs[:limit]
+                continue
+            if len(jobs) >= limit:
+                break
         return jobs[:limit]
 
     def search_from_plan(self, search_plan: Dict[str, Any]) -> List[IsraeliJob]:
         total_limit = search_plan.get("total_limit", 100)
         jobs_per_source = search_plan.get("jobs_per_source", 25)
-        max_workers = int(search_plan.get("max_workers", 12))
+        max_workers = int(search_plan.get("max_workers", 10))
         max_tasks = int(search_plan.get("max_tasks", 80))
         jobs: List[IsraeliJob] = []
         seen = set()
@@ -93,7 +83,7 @@ class IsraelSearchEngine:
                     except Exception as exc:
                         self.emit_progress(search_plan, completed, total_steps, len(jobs), adapter.source, f"error: {exc}")
                         continue
-                    for job in query_jobs:
+                    for job in self.filter_jobs_by_query(query_jobs, query):
                         key = (job.source, job.source_job_id)
                         if key in seen:
                             continue
@@ -110,6 +100,33 @@ class IsraelSearchEngine:
     @staticmethod
     def search_adapter(adapter: Any, query: SearchQuery) -> List[IsraeliJob]:
         return adapter.search(query)
+
+    @classmethod
+    def filter_jobs_by_query(cls, jobs: List[IsraeliJob], query: SearchQuery) -> List[IsraeliJob]:
+        if not query.keywords:
+            return jobs
+        return [job for job in jobs if cls.job_matches_query(job, query)]
+
+    @classmethod
+    def job_matches_query(cls, job: IsraeliJob, query: SearchQuery) -> bool:
+        haystack = cls.normalize_match_text(
+            " ".join([job.title or "", job.company or "", job.location or "", job.description or ""])
+        )
+        return any(cls.keyword_in_text(keyword, haystack) for keyword in query.keywords if keyword)
+
+    @classmethod
+    def keyword_in_text(cls, keyword: str, haystack: str) -> bool:
+        normalized = cls.normalize_match_text(keyword)
+        if not normalized:
+            return True
+        return normalized in haystack
+
+    @staticmethod
+    def normalize_match_text(value: str) -> str:
+        text = unescape(value or "").lower()
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"[^\w\u0590-\u05ff+#.-]+", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
 
     def search_from_plan_serial(self, search_plan: Dict[str, Any]) -> List[IsraeliJob]:
         total_limit = search_plan.get("total_limit", 100)
@@ -139,7 +156,7 @@ class IsraelSearchEngine:
                 except Exception as exc:
                     self.emit_progress(search_plan, step, total_steps, len(jobs), adapter.source, f"error: {exc}")
                     continue
-                for job in query_jobs:
+                for job in self.filter_jobs_by_query(query_jobs, query):
                     key = (job.source, job.source_job_id)
                     if key in seen:
                         continue
