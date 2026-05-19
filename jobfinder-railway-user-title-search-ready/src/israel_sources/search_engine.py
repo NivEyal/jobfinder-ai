@@ -109,22 +109,34 @@ class IsraelSearchEngine:
 
     @classmethod
     def job_matches_query(cls, job: IsraeliJob, query: SearchQuery) -> bool:
-        haystack = cls.normalize_match_text(
-            " ".join([job.title or "", job.company or "", job.location or "", job.description or ""])
-        )
-        return any(cls.keyword_in_text(keyword, haystack) for keyword in query.keywords if keyword)
+        title = cls.normalize_match_text(job.title or "")
+        if not title:
+            return False
+        return any(cls.keyword_matches_title(keyword, title) for keyword in query.keywords if keyword)
 
     @classmethod
-    def keyword_in_text(cls, keyword: str, haystack: str) -> bool:
+    def keyword_matches_title(cls, keyword: str, title: str) -> bool:
         normalized = cls.normalize_match_text(keyword)
         if not normalized:
             return True
-        return normalized in haystack
+        if normalized in title:
+            return True
+        keyword_tokens = cls.significant_tokens(normalized)
+        title_tokens = set(cls.significant_tokens(title))
+        if not keyword_tokens or not title_tokens:
+            return False
+        return all(token in title_tokens for token in keyword_tokens)
+
+    @staticmethod
+    def significant_tokens(value: str) -> List[str]:
+        ignored = {"job", "jobs", "role", "remote", "hybrid", "full", "time", "משרה", "עבודה"}
+        return [token for token in value.split() if token and token not in ignored]
 
     @staticmethod
     def normalize_match_text(value: str) -> str:
         text = unescape(value or "").lower()
         text = re.sub(r"<[^>]+>", " ", text)
+        text = text.replace("-", " ")
         text = re.sub(r"[^\w\u0590-\u05ff+#.-]+", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
@@ -186,16 +198,3 @@ class IsraelSearchEngine:
             return
         self.progress_callback(
             {
-                "phase": "searching",
-                "status": status,
-                "source": source,
-                "jobs_found_so_far": found,
-                "target_jobs": search_plan.get("total_limit", 100),
-                "step": step,
-                "total_steps": total_steps,
-                "percent": int(min(99, max(1, step / max(total_steps, 1) * 100))),
-            }
-        )
-
-    def cancel_requested(self) -> bool:
-        return bool(self.cancel_callback and self.cancel_callback())
