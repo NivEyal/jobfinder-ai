@@ -21,7 +21,11 @@ class JobMatcher:
         return self.matcher.match(job, resume_text)
 
     def match_many(self, jobs: Iterable[Job], resume_text: str) -> List[MatchResult]:
-        results = [self.match(job, resume_text) for job in jobs]
+        job_list = list(jobs)
+        if self.provider == "openai" and hasattr(self.matcher, "match_batch"):
+            results = self.matcher.match_batch(job_list, resume_text)
+        else:
+            results = [self.matcher.match(job, resume_text) for job in job_list]
         return sorted(results, key=lambda result: result.score, reverse=True)
 
     def recommended(self, jobs: Iterable[Job], resume_text: str) -> List[MatchResult]:

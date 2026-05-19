@@ -26,21 +26,33 @@ class IsraelSearchEngine:
                 adapter.max_pages = max_pages
 
     def search(self, keywords: List[str], locations: List[str], limit: int = 25) -> List[IsraeliJob]:
+        from concurrent.futures import as_completed as _as_completed
         query = SearchQuery(keywords=keywords, locations=locations, limit=limit)
         jobs: List[IsraeliJob] = []
-        for adapter in self.adapters:
+        seen: set = set()
+
+        def _search_one(adapter):
             try:
-                jobs.extend(adapter.search(query))
+                return adapter.search(query)
             except Exception:
-                continue
-            if len(jobs) >= limit:
-                break
+                return []
+
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = {executor.submit(_search_one, adapter): adapter for adapter in self.adapters}
+            for future in _as_completed(futures):
+                for job in future.result():
+                    key = (job.source, job.source_job_id)
+                    if key not in seen:
+                        seen.add(key)
+                        jobs.append(job)
+                        if len(jobs) >= limit:
+                            return jobs[:limit]
         return jobs[:limit]
 
     def search_from_plan(self, search_plan: Dict[str, Any]) -> List[IsraeliJob]:
         total_limit = search_plan.get("total_limit", 100)
         jobs_per_source = search_plan.get("jobs_per_source", 25)
-        max_workers = int(search_plan.get("max_workers", 10))
+        max_workers = int(search_plan.get("max_workers", 12))
         max_tasks = int(search_plan.get("max_tasks", 80))
         jobs: List[IsraeliJob] = []
         seen = set()

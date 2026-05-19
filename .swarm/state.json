@@ -1,0 +1,29 @@
+{
+  "swarmId": "swarm-mpc66uzn",
+  "objective": "Analyze and improve the jobfinder project: find bugs, improve the job search heavily, optimize performance, improve UI components",
+  "strategy": "optimization",
+  "status": "initialized",
+  "agents": 5,
+  "agentPlan": [
+    {
+      "role": "Performance Lead",
+      "type": "optimizer",
+      "count": 1,
+      "purpose": "Performance strategy"
+    },
+    {
+      "role": "Profiler",
+      "type": "analyst",
+      "count": 2,
+      "purpose": "Profiling"
+    },
+    {
+      "role": "Optimizer",
+      "type": "coder",
+      "count": 2,
+      "purpose": "Optimization"
+    }
+  ],
+  "startedAt": "2026-05-19T05:06:00.428Z",
+  "parallel": true
+}

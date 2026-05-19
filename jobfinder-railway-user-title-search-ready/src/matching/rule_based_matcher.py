@@ -9,7 +9,6 @@ TOKEN_RE = re.compile(r"[\w\u0590-\u05ff+#.-]+", re.UNICODE)
 
 
 class RuleBasedMatcher:
-    """Deterministic fallback matcher that works without external services."""
 
     def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or {}
@@ -17,23 +16,35 @@ class RuleBasedMatcher:
         self.strong_threshold = int(matching.get("strong_match_score", 80))
         self.possible_threshold = int(matching.get("possible_match_score", 60))
 
-    def match(self, job: Job, resume_text: str) -> MatchResult:
-        resume_tokens = tokenize(resume_text)
-        job_text = build_job_text(job)
-        job_tokens = tokenize(job_text)
-
         search = self.config.get("search", {})
         filters = self.config.get("filters", {})
         include = filters.get("include", {})
         exclude = filters.get("exclude", {})
 
-        preferred_keywords = expand_config_keywords(
+        self._preferred_keywords = expand_config_keywords(
             search.get("keywords", []),
             search.get("keyword_aliases", {}),
             include.get("nice_to_have_keywords", []),
         )
-        must_have = include.get("must_have_keywords", [])
-        excluded_keywords = {item.lower() for item in exclude.get("keywords", [])}
+        self._must_have = include.get("must_have_keywords", [])
+        self._excluded_keywords = {item.lower() for item in exclude.get("keywords", [])}
+        self._remote_types = set(search.get("remote_types", []))
+        self._employment_types = set(search.get("employment_types", []))
+        self._seniority_set = set(search.get("seniority", []))
+        self._years = search.get("years_experience", {})
+
+        if self._excluded_keywords:
+            escaped = [re.escape(kw) for kw in self._excluded_keywords]
+            self._excluded_re = re.compile("|".join(escaped), re.IGNORECASE)
+        else:
+            self._excluded_re = None
+
+    def match(self, job: Job, resume_text: str) -> MatchResult:
+        resume_tokens = tokenize(resume_text)
+        job_text = build_job_text(job)
+        job_text_lower = job_text.lower()
+        job_tokens = tokenize(job_text)
+        combined_tokens = job_tokens | resume_tokens
 
         score = 35
         reasons: List[str] = []
@@ -41,7 +52,8 @@ class RuleBasedMatcher:
         missing_requirements: List[str] = []
 
         matched_config_keywords = [
-            keyword for keyword in preferred_keywords if keyword_matches(keyword, job_text, job_tokens, resume_tokens)
+            kw for kw in self._preferred_keywords
+            if _keyword_matches_fast(kw, job_text_lower, job_tokens, combined_tokens)
         ]
         if matched_config_keywords:
             keyword_points = min(25, 8 + len(matched_config_keywords) * 4)
@@ -55,42 +67,41 @@ class RuleBasedMatcher:
             score += overlap_points
             reasons.append(f"Resume overlaps with {len(resume_overlap)} job terms")
 
-        for keyword in must_have:
-            if not keyword_matches(keyword, job_text, job_tokens, resume_tokens):
+        for keyword in self._must_have:
+            if not _keyword_matches_fast(keyword, job_text_lower, job_tokens, combined_tokens):
                 score -= 18
                 missing_requirements.append(keyword)
 
-        if job.remote_type and job.remote_type in set(search.get("remote_types", [])):
+        if job.remote_type and job.remote_type in self._remote_types:
             score += 8
             reasons.append(f"Remote type is allowed: {job.remote_type}")
         elif job.remote_type:
             score -= 6
             missing_requirements.append(f"remote_type:{job.remote_type}")
 
-        if job.employment_type and job.employment_type in set(search.get("employment_types", [])):
+        if job.employment_type and job.employment_type in self._employment_types:
             score += 7
             reasons.append(f"Employment type is allowed: {job.employment_type}")
         elif job.employment_type:
             score -= 6
             missing_requirements.append(f"employment_type:{job.employment_type}")
 
-        if job.seniority and job.seniority in set(search.get("seniority", [])):
+        if job.seniority and job.seniority in self._seniority_set:
             score += 7
             reasons.append(f"Seniority is allowed: {job.seniority}")
         elif job.seniority:
             score -= 8
             missing_requirements.append(f"seniority:{job.seniority}")
 
-        years = search.get("years_experience", {})
-        if job.years_experience is not None and years:
-            if years.get("min", 0) <= job.years_experience <= years.get("max", 99):
+        if job.years_experience is not None and self._years:
+            if self._years.get("min", 0) <= job.years_experience <= self._years.get("max", 99):
                 score += 6
                 reasons.append("Years of experience are inside the preferred range")
             else:
                 score -= 8
                 missing_requirements.append(f"years_experience:{job.years_experience}")
 
-        if any(keyword in job_text.lower() for keyword in excluded_keywords):
+        if self._excluded_re and self._excluded_re.search(job_text_lower):
             score -= 35
             missing_requirements.append("excluded_keyword")
 
@@ -134,14 +145,18 @@ def tokenize(text: str) -> Set[str]:
     return {token.lower() for token in TOKEN_RE.findall(text or "") if len(token) > 1}
 
 
-def keyword_matches(keyword: str, job_text: str, job_tokens: Set[str], resume_tokens: Set[str]) -> bool:
+def _keyword_matches_fast(keyword: str, job_text_lower: str, job_tokens: Set[str], combined_tokens: Set[str]) -> bool:
     lowered = (keyword or "").lower().strip()
     if not lowered:
         return False
-    if lowered in job_text.lower():
+    if lowered in job_text_lower:
         return True
     keyword_tokens = tokenize(lowered)
-    return bool(keyword_tokens and keyword_tokens.issubset(job_tokens.union(resume_tokens)))
+    return bool(keyword_tokens and keyword_tokens.issubset(combined_tokens))
+
+
+def keyword_matches(keyword: str, job_text: str, job_tokens: Set[str], resume_tokens: Set[str]) -> bool:
+    return _keyword_matches_fast(keyword, job_text.lower(), job_tokens, job_tokens | resume_tokens)
 
 
 def expand_config_keywords(keywords: Iterable[str], aliases: Dict[str, List[str]], extras: Iterable[str]) -> List[str]:

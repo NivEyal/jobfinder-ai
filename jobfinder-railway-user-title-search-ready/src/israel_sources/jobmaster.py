@@ -14,35 +14,37 @@ class JobMasterAdapter(JsonLdJobAdapter):
             "jobs/",
             {
                 "currPage": page if page > 1 else None,
-                "q": query.keyword_text,
+                "q": query.keyword_text or None,
             },
         )
 
     def parse_jobs(self, payload: str, query: SearchQuery) -> List[IsraeliJob]:
+        if not payload:
+            return []
         jobs: List[IsraeliJob] = []
         for block in self.split_blocks(r'<article[^>]+id="misra\d+"', payload):
-            job_id = self.first_match(r'id="misra(\d+)"', block)
-            title = self.first_match(r'class="CardHeader[^"]*"[^>]+href=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a>', block)
-            if not title:
-                title = self.first_match(r'class="CardHeader[^"]*"[^>]*>(.*?)</a>', block)
-            else:
+            try:
+                job_id = self.first_match(r'id="misra(\d+)"', block)
+                href = self.first_match(r'class="CardHeader[^"]*"[^>]+href=[\'"]([^\'"]+)[\'"]', block)
                 title = self.first_match(r'class="CardHeader[^"]*"[^>]+href=[\'"][^\'"]+[\'"][^>]*>(.*?)</a>', block)
-            if not job_id or not title:
-                continue
-            href = self.first_match(r'class="CardHeader[^"]*"[^>]+href=[\'"]([^\'"]+)[\'"]', block)
-            company = self.first_match(r'class="font14 CompanyNameLink"[^>]*>\s*<span>(.*?)</span>', block)
-            location = self.first_match(r'class="jobLocation"[^>]*>\s*<span>(.*?)</span>', block)
-            description = self.first_match(r'class="jobShortDescription[^"]*"[^>]*>(.*?)</div>', block)
-            posted_at = self.first_match(r'class="Gray"[^>]*>\s*(.*?)\s*</span>', block)
-            jobs.append(
-                self.make_job(
-                    source_job_id=job_id,
-                    title=title,
-                    company=company or "JobMaster",
-                    location=location or (query.location_text if query else "") or "Israel",
-                    description=description or title,
-                    apply_url=self.absolute_url(href or f"/jobs/checknum.asp?key={job_id}"),
-                    posted_at=None,
+                if not title:
+                    title = self.first_match(r'class="CardHeader[^"]*"[^>]*>(.*?)</a>', block)
+                if not job_id or not title:
+                    continue
+                company = self.first_match(r'class="font14 CompanyNameLink"[^>]*>\s*<span>(.*?)</span>', block)
+                location = self.first_match(r'class="jobLocation"[^>]*>\s*<span>(.*?)</span>', block)
+                description = self.first_match(r'class="jobShortDescription[^"]*"[^>]*>(.*?)</div>', block)
+                jobs.append(
+                    self.make_job(
+                        source_job_id=job_id,
+                        title=title,
+                        company=company or "JobMaster",
+                        location=location or (query.location_text if query else "") or "Israel",
+                        description=description or title,
+                        apply_url=self.absolute_url(href or f"/jobs/checknum.asp?key={job_id}"),
+                        posted_at=None,
+                    )
                 )
-            )
+            except Exception:
+                continue
         return jobs

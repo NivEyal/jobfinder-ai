@@ -1,0 +1,24 @@
+{
+  "swarms": {
+    "swarm-1779167160425-rydh4w": {
+      "swarmId": "swarm-1779167160425-rydh4w",
+      "topology": "hierarchical",
+      "maxAgents": 5,
+      "status": "running",
+      "agents": [],
+      "tasks": [],
+      "config": {
+        "topology": "hierarchical",
+        "maxAgents": 5,
+        "strategy": "optimization",
+        "communicationProtocol": "message-bus",
+        "autoScaling": true,
+        "consensusMechanism": "majority"
+      },
+      "createdAt": "2026-05-19T05:06:00.425Z",
+      "updatedAt": "2026-05-19T05:06:00.425Z",
+      "pid": 18584
+    }
+  },
+  "version": "3.0.0"
+}

@@ -14,6 +14,7 @@ from src.apply import ApplicationRequest, ApplicationResult, AutoApplyEngine
 from src.israel_sources.search_engine import IsraelSearchEngine
 from src.job import Job
 from src.matching import JobMatcher, MatchResult
+from src.matching.openai_matcher import generate_ai_insights
 from src.matching.rule_based_matcher import RuleBasedMatcher
 from src.resume_schemas.israeli_resume import IsraeliResume
 from src.storage import JsonlStore, SQLiteStore
@@ -155,7 +156,7 @@ class DailyPipeline:
         threshold = automation["match_threshold"]
         throttle_every = int(automation.get("apply_throttle_every", 10))
         throttle_seconds = int(automation.get("apply_throttle_seconds", 3))
-        openai_max_jobs = int(self.config.get("matching", {}).get("openai_max_jobs_per_run", 20))
+        openai_max_jobs = int(self.config.get("matching", {}).get("openai_max_jobs_per_run", 50))
 
         for user in active_users:
             matcher = JobMatcher(self.user_config(user))
@@ -231,7 +232,10 @@ class DailyPipeline:
                     self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
 
         self.mark_old_jobs_inactive(days=automation["expire_after_days"])
-        self.write_ai_insights(match_results, jobs)
+        try:
+            self.write_ai_insights(match_results, jobs)
+        except Exception:
+            pass
         summary = PipelineSummary(
             automation_status=automation["status"],
             last_run_at=local_display_time(now),
@@ -265,45 +269,55 @@ class DailyPipeline:
         openai_max_jobs: int,
     ) -> List[tuple[Job, MatchResult]]:
         if not jobs:
+            self.write_progress("לא נמצאו משרות לדירוג", 0, 0, 100, "matching")
             return []
+
+        # Step 1: rule-based pre-filter (fast, local)
         self.write_progress("מסנן התאמות מקומית לפני OpenAI", len(jobs), len(jobs), 70, "matching")
         local_pairs = [(job, fallback_matcher.match(job, resume_text)) for job in jobs]
         local_pairs.sort(key=lambda item: item[1].score, reverse=True)
 
-        if self.config.get("matching", {}).get("provider") != "openai" or openai_max_jobs <= 0:
+        use_openai = (
+            self.config.get("matching", {}).get("provider", "openai") == "openai"
+            and openai_max_jobs > 0
+        )
+        if not use_openai:
             return local_pairs
 
+        # Step 2: OpenAI batch-ranks the top candidates
         top_jobs = [job for job, _ in local_pairs[:openai_max_jobs]]
-        max_workers = int(self.config.get("matching", {}).get("openai_max_workers", 6))
+        self.write_progress(
+            f"שולח {len(top_jobs)} משרות מובילות ל-OpenAI לדירוג מדויק",
+            jobs_found=len(jobs),
+            target_jobs=len(jobs),
+            percent=75,
+            phase="matching",
+        )
+
         openai_results: Dict[str, MatchResult] = {}
-        executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
-        futures = {executor.submit(matcher.match, job, resume_text): job for job in top_jobs}
-        completed = 0
-        try:
-            pending = set(futures)
-            while pending:
-                if self.cancel_requested():
-                    self.write_progress("דירוג OpenAI נעצר לבקשת המשתמש", len(jobs), len(jobs), 100, "cancelled")
-                    break
-                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
-                if not done:
-                    continue
-                for future in done:
-                    completed += 1
-                    job = futures[future]
-                    try:
-                        openai_results[job.fingerprint] = future.result()
-                    except Exception:
-                        pass
-                    self.write_progress(
-                        f"מדרג התאמות עם OpenAI ({completed}/{len(top_jobs)})",
-                        jobs_found=len(jobs),
-                        target_jobs=len(jobs),
-                        percent=min(98, 75 + int(completed / max(len(top_jobs), 1) * 20)),
-                        phase="matching",
-                    )
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+        if self.cancel_requested():
+            self.write_progress("דירוג OpenAI נעצר לבקשת המשתמש", len(jobs), len(jobs), 100, "cancelled")
+        else:
+            try:
+                # Use batch API — groups into chunks of 8, far fewer API calls
+                batch_results = matcher.match_many(top_jobs, resume_text)
+                for result in batch_results:
+                    openai_results[result.job_fingerprint] = result
+                self.write_progress(
+                    f"OpenAI דירג {len(openai_results)} משרות",
+                    jobs_found=len(jobs),
+                    target_jobs=len(jobs),
+                    percent=95,
+                    phase="matching",
+                )
+            except Exception as exc:
+                self.write_progress(
+                    f"OpenAI נכשל, ממשיך עם דירוג מקומי: {exc}",
+                    jobs_found=len(jobs),
+                    target_jobs=len(jobs),
+                    percent=95,
+                    phase="matching",
+                )
 
         merged = [(job, openai_results.get(job.fingerprint, match)) for job, match in local_pairs]
         merged.sort(key=lambda item: item[1].score, reverse=True)
@@ -398,43 +412,40 @@ class DailyPipeline:
         phase: str,
         source: str = "",
     ) -> None:
-        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
-        output_dir.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "message": message,
-            "phase": phase,
-            "source": source,
-            "jobs_found_so_far": jobs_found,
-            "target_jobs": target_jobs,
-            "percent": max(0, min(100, percent)),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        (output_dir / "job_search_progress.json").write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        try:
+            output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "message": message,
+                "phase": phase,
+                "source": source,
+                "jobs_found_so_far": jobs_found,
+                "target_jobs": target_jobs,
+                "percent": max(0, min(100, percent)),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            (output_dir / "job_search_progress.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
     def write_ai_insights(self, matches: List[MatchResult], jobs: List[Job]) -> None:
         output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
         output_dir.mkdir(parents=True, exist_ok=True)
         openai_used = sum(1 for match in matches if match.used_openai)
         top_matches = sorted(matches, key=lambda item: item.score, reverse=True)[:5]
-        missing = []
-        reasons = []
-        for match in top_matches:
-            missing.extend(match.missing_requirements[:3])
-            reasons.extend(match.reasons[:3])
+
+        resume_text = self.read_resume_text()
+        insights = generate_ai_insights(matches, jobs, resume_text, self.config)
+
         payload = {
             "openai_used": openai_used,
-            "model": self.config.get("matching", {}).get("model", ""),
+            "model": self.config.get("matching", {}).get("model", "gpt-4o-mini"),
             "jobs_analyzed": len(matches),
             "top_score": top_matches[0].score if top_matches else 0,
-            "insights": [
-                f"OpenAI ניתח {openai_used} מתוך {len(matches)} משרות מובילות; שאר המשרות דורגו מהר יותר עם fallback מקומי.",
-                f"ציון ההתאמה הגבוה ביותר כרגע הוא {top_matches[0].score if top_matches else 0}.",
-                f"דרישות שחוזרות במשרות מובילות: {', '.join(dict.fromkeys(missing[:5])) or 'אין מספיק נתונים עדיין'}.",
-                f"סיבות התאמה בולטות: {', '.join(dict.fromkeys(reasons[:5])) or 'אין מספיק נתונים עדיין'}.",
-            ],
+            "insights": insights,
         }
         (output_dir / "ai_insights.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),

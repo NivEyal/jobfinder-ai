@@ -1,12 +1,22 @@
 import hashlib
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import unescape
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urljoin
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+_RETRY = Retry(total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
+_ADAPTER = HTTPAdapter(pool_connections=20, pool_maxsize=50, max_retries=_RETRY)
+_SESSION = requests.Session()
+_SESSION.mount("http://", _ADAPTER)
+_SESSION.mount("https://", _ADAPTER)
 
 from src.israel_sources.models import IsraeliJob
 
@@ -42,39 +52,44 @@ class IsraelSourceAdapter:
     def parse_jobs(self, payload: str, query: SearchQuery) -> List[IsraeliJob]:
         return []
 
+    _HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+
     def search(self, query: SearchQuery) -> List[IsraeliJob]:
         jobs: List[IsraeliJob] = []
-        seen = set()
-        for page in range(1, self.max_pages + 1):
-            payload = self.fetch(self.build_search_url(query, page=page))
-            page_jobs = self.parse_jobs(payload, query)
-            for job in page_jobs:
-                dedupe_key = (job.source, job.source_job_id)
-                if dedupe_key in seen:
+        seen: set = set()
+        pages = list(range(1, self.max_pages + 1))
+        with ThreadPoolExecutor(max_workers=min(len(pages), 4)) as executor:
+            futures = {
+                executor.submit(self.fetch, self.build_search_url(query, page=p)): p
+                for p in pages
+            }
+            for future in as_completed(futures):
+                try:
+                    payload = future.result()
+                except Exception:
                     continue
-                seen.add(dedupe_key)
-                jobs.append(job)
-                if len(jobs) >= query.limit:
-                    return jobs
-            if not page_jobs:
-                break
+                for job in self.parse_jobs(payload, query):
+                    key = (job.source, job.source_job_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    jobs.append(job)
+                    if len(jobs) >= query.limit:
+                        return jobs
         return jobs
 
-    def fetch(self, url: str, timeout: int = 8) -> str:
-        request = Request(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
-            },
-        )
-        with urlopen(request, timeout=timeout) as response:
-            return response.read().decode("utf-8", errors="replace")
+    def fetch(self, url: str, timeout: int = 10) -> str:
+        resp = _SESSION.get(url, headers=self._HEADERS, timeout=timeout)
+        resp.raise_for_status()
+        return resp.text
 
     def make_url(self, path: str, params: Optional[Dict[str, Any]] = None) -> str:
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"

@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source, source_job_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_at);
 
 CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +122,8 @@ class SQLiteStore:
     def connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         try:
             yield conn
             conn.commit()
@@ -305,11 +309,39 @@ class SQLiteStore:
             return [dict(row) for row in rows]
 
     def save_jobs(self, jobs: Iterable[Job]) -> int:
-        count = 0
+        now = utc_now()
+        rows = []
         for job in jobs:
-            self.save_job(job)
-            count += 1
-        return count
+            data = job.to_dict()
+            rows.append({
+                **data,
+                "raw_json": json.dumps(data, ensure_ascii=False),
+                "updated_at": now,
+            })
+        if not rows:
+            return 0
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO jobs (
+                    fingerprint, source, source_job_id, canonical_url, company, title, location, region,
+                    remote_type, employment_type, seniority, years_experience, salary_min, salary_max,
+                    language, apply_email, apply_url, status, first_seen_at, last_seen_at, raw_json, updated_at
+                )
+                VALUES (
+                    :fingerprint, :source, :source_job_id, :canonical_url, :company, :title, :location, :region,
+                    :remote_type, :employment_type, :seniority, :years_experience, :salary_min, :salary_max,
+                    :language, :apply_email, :apply_url, :status, :first_seen_at, :last_seen_at, :raw_json, :updated_at
+                )
+                ON CONFLICT(fingerprint) DO UPDATE SET
+                    last_seen_at=excluded.last_seen_at,
+                    status=excluded.status,
+                    raw_json=excluded.raw_json,
+                    updated_at=excluded.updated_at
+                """,
+                rows,
+            )
+        return len(rows)
 
 
 def utc_now() -> str:

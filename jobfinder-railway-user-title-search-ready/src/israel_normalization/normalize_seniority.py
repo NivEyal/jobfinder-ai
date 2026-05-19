@@ -21,19 +21,22 @@ def normalize_seniority(value: str) -> str:
     return ""
 
 
+_RANGE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)")
+_YEARS_EN_RE = re.compile(r"(\d+(?:\.\d+)?)\+?\s*(?:years|yrs|year)", re.IGNORECASE)
+_YEARS_HE_RE = re.compile(r"(\d+(?:\.\d+)?)\+?\s*(?:שנות|שנים|שנה)", re.IGNORECASE)
+
+
 def normalize_years_experience(value: str) -> Optional[float]:
     text = normalize_key(value)
     if any(term in text for term in ["ללא ניסיון", "ללא נסיון", "no experience"]):
         return 0
-    range_match = re.search(r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)", text)
-    if range_match:
-        return float(range_match.group(1))
-    patterns = [
-        r"(\d+(?:\.\d+)?)\+?\s*(?:years|yrs|year)",
-        r"(\d+(?:\.\d+)?)\+?\s*(?:שנות|שנים|שנה)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            return float(match.group(1))
+    m = _RANGE_RE.search(text)
+    if m:
+        return float(m.group(1))
+    m = _YEARS_EN_RE.search(text)
+    if m:
+        return float(m.group(1))
+    m = _YEARS_HE_RE.search(text)
+    if m:
+        return float(m.group(1))
     return None

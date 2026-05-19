@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Type
 
 from src.israel_sources.Jobnet import JobnetAdapter
@@ -58,9 +59,22 @@ def get_all_adapters() -> List[IsraelSourceAdapter]:
 
 def search_all_sources(query: SearchQuery) -> List[IsraeliJob]:
     jobs: List[IsraeliJob] = []
-    for adapter in get_all_adapters():
+    seen: set = set()
+
+    def _search_one(adapter):
         try:
-            jobs.extend(adapter.search(query))
+            return adapter.search(query)
         except Exception:
-            continue
+            return []
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = {executor.submit(_search_one, adapter): adapter for adapter in get_all_adapters()}
+        for future in as_completed(futures):
+            for job in future.result():
+                key = (job.source, job.source_job_id)
+                if key not in seen:
+                    seen.add(key)
+                    jobs.append(job)
+                    if len(jobs) >= query.limit:
+                        return jobs
     return jobs[: query.limit]

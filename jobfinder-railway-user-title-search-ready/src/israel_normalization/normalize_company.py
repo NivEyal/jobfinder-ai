@@ -14,9 +14,13 @@ LEGAL_SUFFIXES = [
     "LLC",
 ]
 
+_SUFFIX_RE = re.compile(
+    r"\s*(?:" + "|".join(re.escape(s) for s in LEGAL_SUFFIXES) + r")$",
+    flags=re.IGNORECASE,
+)
+
 
 def normalize_company(value: str, output_language: str = "he") -> str:
     text = clean_text(value)
-    for suffix in LEGAL_SUFFIXES:
-        text = re.sub(rf"\s*{re.escape(suffix)}$", "", text, flags=re.IGNORECASE)
+    text = _SUFFIX_RE.sub("", text)
     return text.strip()

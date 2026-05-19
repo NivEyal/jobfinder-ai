@@ -22,6 +22,8 @@ class DrushimAdapter(JsonLdJobAdapter):
             },
         )
 
+    max_pages = 2
+
     def parse_jobs(self, payload: str, query: SearchQuery) -> List[IsraeliJob]:
         try:
             data = json.loads(payload)
@@ -30,36 +32,41 @@ class DrushimAdapter(JsonLdJobAdapter):
 
         jobs: List[IsraeliJob] = []
         for item in data.get("ResultList", []):
-            job_content = item.get("JobContent") or {}
-            job_info = item.get("JobInfo") or {}
-            company = item.get("Company") or {}
-            send_cv = item.get("SendCVButtonModel") or {}
+            try:
+                job_content = item.get("JobContent") or {}
+                job_info = item.get("JobInfo") or {}
+                company = item.get("Company") or {}
+                send_cv = item.get("SendCVButtonModel") or {}
 
-            source_job_id = str(item.get("Code") or job_content.get("JobCode") or job_info.get("JobCode") or "")
-            title = job_content.get("FullName") or job_content.get("Name") or ""
-            description = " ".join(
-                part
-                for part in [
-                    job_content.get("Description"),
-                    job_content.get("Requirements"),
-                    job_content.get("DeclarationAllGenders"),
-                ]
-                if part
-            )
-            apply_url = send_cv.get("ExternalLink") or send_cv.get("ButtonLink") or job_info.get("Link") or ""
+                title = str(job_content.get("FullName") or job_content.get("Name") or "")
+                if not title:
+                    continue
 
-            jobs.append(
-                self.make_job(
-                    source_job_id=source_job_id,
-                    title=title,
-                    company=company.get("CompanyDisplayName") or company.get("NameInHebrew") or "Drushim",
-                    location=self._location(job_content),
-                    description=description or title,
-                    apply_url=self.absolute_url(apply_url),
-                    apply_method="external_url",
-                    posted_at=self._parse_date(job_info.get("DisplayDate") or job_info.get("Date")),
+                source_job_id = str(item.get("Code") or job_content.get("JobCode") or job_info.get("JobCode") or "")
+                description = " ".join(
+                    part
+                    for part in [
+                        job_content.get("Description"),
+                        job_content.get("Requirements"),
+                        job_content.get("DeclarationAllGenders"),
+                    ]
+                    if part
                 )
-            )
+                apply_url = send_cv.get("ExternalLink") or send_cv.get("ButtonLink") or job_info.get("Link") or ""
+                jobs.append(
+                    self.make_job(
+                        source_job_id=source_job_id,
+                        title=title,
+                        company=company.get("CompanyDisplayName") or company.get("NameInHebrew") or "Drushim",
+                        location=self._location(job_content),
+                        description=description or title,
+                        apply_url=self.absolute_url(apply_url) if apply_url else self.base_url,
+                        apply_method="external_url",
+                        posted_at=self._parse_date(job_info.get("DisplayDate") or job_info.get("Date")),
+                    )
+                )
+            except Exception:
+                continue
         return jobs
 
     @staticmethod
