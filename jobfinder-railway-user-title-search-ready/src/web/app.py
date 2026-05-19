@@ -409,15 +409,24 @@ def status() -> Dict[str, Any]:
     progress_path = output_dir / "job_search_progress.json"
     if progress_path.exists():
         progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
-        if progress_payload.get("phase") in {"starting", "searching", "matching"}:
+        if progress_payload.get("phase") in {"starting", "searching", "matching", "failed", "cancelled"}:
             return in_progress_status(config, progress_payload)
     status_path = output_dir / "automation_status.json"
     if status_path.exists():
-        return json.loads(status_path.read_text(encoding="utf-8"))
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+        active_run = active_search_run(output_dir)
+        if active_run and payload.get("run_id") != active_run.get("run_id"):
+            return empty_fresh_status(config, "ממתין לחיפוש חדש. תוצאות ישנות לא מוצגות.")
+        return payload
     return {
-        "status": "לא רץ עדיין",
+        "status": "לא רץ חיפוש חדש עדיין",
         "subscription_locked": is_subscription_locked(config),
         "subscription_pay_url": config["subscription"]["pay_url"],
+        "application_inbox": [],
+        "jobs_found_today": 0,
+        "applications_sent_today": 0,
+        "requires_approval": 0,
+        "daily_limit": f"0/{config['automation']['daily_application_limit']}",
     }
 
 
@@ -433,6 +442,26 @@ def progress() -> Dict[str, Any]:
         "jobs_found_so_far": 0,
         "target_jobs": 100,
         "percent": 0,
+    }
+
+
+@app.get("/api/search-diagnostics")
+def search_diagnostics() -> Dict[str, Any]:
+    config = load_config()
+    output_dir = Path(config["output"].get("summary_dir", "data_folder/output"))
+    diagnostics_path = output_dir / "search_diagnostics.jsonl"
+    records = []
+    if diagnostics_path.exists():
+        for line in diagnostics_path.read_text(encoding="utf-8").splitlines()[-100:]:
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return {
+        "active_run": active_search_run(output_dir),
+        "records": records,
     }
 
 
@@ -655,6 +684,16 @@ def prepare_new_search_run(search_title: str, target_jobs: int = 100) -> str:
         if path.exists():
             path.unlink()
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    active_payload = {
+        "run_id": run_id,
+        "search_title": search_title,
+        "target_jobs": target_jobs,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    (output_dir / "active_search_run.json").write_text(
+        json.dumps(active_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     payload = {
         "message": "מתחיל חיפוש חדש. תוצאות ישנות נוקו ולא יוצגו.",
         "phase": "starting",
@@ -670,12 +709,24 @@ def prepare_new_search_run(search_title: str, target_jobs: int = 100) -> str:
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    (output_dir / "automation_status.json").write_text(
+        json.dumps(in_progress_status(config, payload), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return run_id
 
 
 def in_progress_status(config: Dict[str, Any], progress_payload: Dict[str, Any]) -> Dict[str, Any]:
+    phase = progress_payload.get("phase", "")
+    status_text = {
+        "starting": "חיפוש חדש מתחיל עכשיו",
+        "searching": "חיפוש חדש רץ עכשיו",
+        "matching": "מדרג התאמות מהריצה החדשה",
+        "failed": "החיפוש החדש נכשל",
+        "cancelled": "החיפוש החדש נעצר",
+    }.get(phase, "חיפוש חדש רץ עכשיו")
     return {
-        "status": "חיפוש חדש רץ עכשיו",
+        "status": status_text,
         "last_run": progress_payload.get("updated_at", ""),
         "next_run": "",
         "jobs_found_today": int(progress_payload.get("jobs_found_so_far", 0)),
@@ -689,6 +740,32 @@ def in_progress_status(config: Dict[str, Any], progress_payload: Dict[str, Any])
         "search_title": progress_payload.get("search_title", ""),
         "run_id": progress_payload.get("run_id", ""),
     }
+
+
+def empty_fresh_status(config: Dict[str, Any], message: str) -> Dict[str, Any]:
+    return {
+        "status": message,
+        "last_run": "",
+        "next_run": "",
+        "jobs_found_today": 0,
+        "applications_sent_today": 0,
+        "requires_approval": 0,
+        "daily_limit": f"0/{config['automation']['daily_application_limit']}",
+        "subscription_locked": is_subscription_locked(config),
+        "subscription_pay_url": config["subscription"]["pay_url"],
+        "application_inbox": [],
+        "search_in_progress": False,
+    }
+
+
+def active_search_run(output_dir: Path) -> Dict[str, Any]:
+    path = output_dir / "active_search_run.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def ai_insights_html() -> str:

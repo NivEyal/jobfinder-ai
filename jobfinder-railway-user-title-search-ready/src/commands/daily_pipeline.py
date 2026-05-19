@@ -540,12 +540,25 @@ class DailyPipeline:
     def write_summary(self, summary: PipelineSummary) -> PipelineSummary:
         output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
         output_dir.mkdir(parents=True, exist_ok=True)
+        progress_path = output_dir / "job_search_progress.json"
+        run_meta: Dict[str, Any] = {}
+        if progress_path.exists():
+            try:
+                progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+                run_meta = {
+                    "run_id": progress_payload.get("run_id", ""),
+                    "search_title": progress_payload.get("search_title", ""),
+                }
+            except json.JSONDecodeError:
+                run_meta = {}
         (output_dir / "daily_summary.json").write_text(
             json.dumps(asdict(summary), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        user_status = summary.to_user_status()
+        user_status.update({key: value for key, value in run_meta.items() if value})
         (output_dir / "automation_status.json").write_text(
-            json.dumps(summary.to_user_status(), ensure_ascii=False, indent=2),
+            json.dumps(user_status, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         self.jsonl.append("pipeline_runs", asdict(summary))
