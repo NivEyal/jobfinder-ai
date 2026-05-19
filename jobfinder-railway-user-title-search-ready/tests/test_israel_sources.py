@@ -35,6 +35,7 @@ def test_registry_supports_requested_source_aliases():
     assert get_adapter("drushim").source == "drushim"
     assert get_adapter("Drushim").source == "drushim"
     assert get_adapter("Jobnet").source == "jobnet"
+    assert get_adapter("techmap").source == "techmap"
 
 
 def test_search_engine_lists_sources():
@@ -48,6 +49,7 @@ def test_search_engine_lists_sources():
         "jobnet",
         "company_careers",
         "comeet",
+        "techmap",
         "remotive",
         "arbeitnow",
         "remoteok",
@@ -178,6 +180,24 @@ def test_comeet_adapter_extracts_israel_jobs_from_positions_data():
     assert jobs[0].source == "comeet"
     assert jobs[0].title == "Backend Developer"
     assert jobs[0].company == "ExampleCo"
+
+
+def test_techmap_adapter_extracts_jobs_from_csv():
+    techmap = get_adapter("techmap")
+    jobs = techmap.parse_jobs(
+        '\ufeff"company","category","size","title","level","city","url","updated"\n'
+        '"ExampleCo","Fintech","m","Junior Economist","Accountant","תל אביב-יפו",'
+        '"https://jobs.example.com/junior-economist?utm_source=techmap","2026-05-19"\n',
+        SearchQuery(keywords=["Junior Economist"], locations=["Israel"], limit=10),
+    )
+
+    assert len(jobs) == 1
+    assert jobs[0].source == "techmap"
+    assert jobs[0].title == "Junior Economist"
+    assert jobs[0].company == "ExampleCo"
+    assert jobs[0].location == "תל אביב-יפו"
+    assert jobs[0].apply_url == "https://jobs.example.com/junior-economist"
+    assert jobs[0].posted_at.year == 2026
 
 
 def test_global_api_adapters_parse_jobs():

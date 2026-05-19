@@ -12,6 +12,7 @@ from src.israel_sources.global_apis import ArbeitnowAdapter, GreenhouseAdapter, 
 from src.israel_sources.indeed import IndeedIsraelAdapter
 from src.israel_sources.jobmaster import JobMasterAdapter
 from src.israel_sources.models import IsraeliJob
+from src.israel_sources.techmap import TechMapAdapter
 
 
 ADAPTER_CLASSES: Dict[str, Type[IsraelSourceAdapter]] = {
@@ -25,6 +26,7 @@ ADAPTER_CLASSES: Dict[str, Type[IsraelSourceAdapter]] = {
     "jobnet": JobnetAdapter,
     "company_careers": CompanyCareersAdapter,
     "comeet": ComeetAdapter,
+    "techmap": TechMapAdapter,
     "remotive": RemotiveAdapter,
     "arbeitnow": ArbeitnowAdapter,
     "remoteok": RemoteOkAdapter,
@@ -51,6 +53,7 @@ def get_all_adapters() -> List[IsraelSourceAdapter]:
         "Jobnet",
         "company_careers",
         "comeet",
+        "techmap",
         "remotive",
         "arbeitnow",
         "remoteok",

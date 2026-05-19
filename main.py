@@ -51,6 +51,7 @@ class ConfigValidator:
         "jobnet",
         "company_careers",
         "comeet",
+        "techmap",
         "remotive",
         "arbeitnow",
         "remoteok",

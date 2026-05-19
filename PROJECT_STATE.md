@@ -57,3 +57,4 @@ This file tracks product decisions and fixes so future point fixes stay consiste
 - Fetch timeout is 8 seconds instead of 20.
 - Matching uses local prefiltering first, then parallel OpenAI only for the strongest jobs (`openai_max_workers=6`).
 - Auto-apply remains sequential with throttle to avoid duplicate or spammy submissions.
+- Added `techmap` source from the Israeli TechMap CSV feed. It reads live category CSVs, filters inside the adapter by the user's title/known Hebrew-English role aliases, and is enabled in both root and nested configs.

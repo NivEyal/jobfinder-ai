@@ -24,6 +24,7 @@ def test_work_preferences_v4_validates_and_builds_broad_search_plan():
     assert config["matching"]["model"] == "gpt-4o-mini"
     assert config["matching"]["api_key_env"] == "OPENAI_API_KEY"
     assert "comeet" in config["sources"]["enabled"]
+    assert "techmap" in config["sources"]["enabled"]
     assert config["matching"]["fallback"] == "rule_based"
     assert config["apply"]["enabled"] is True
     assert config["apply"]["dry_run"] is False
@@ -56,6 +57,7 @@ def test_search_engine_accepts_configured_sources_and_pagination():
         "jobnet",
         "company_careers",
         "comeet",
+        "techmap",
         "remotive",
         "arbeitnow",
         "remoteok",
