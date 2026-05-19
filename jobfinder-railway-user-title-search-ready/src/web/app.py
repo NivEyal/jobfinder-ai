@@ -575,6 +575,9 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>{title}</title>
   <meta name="description" content="JobFinder מוצא משרות, מדרג התאמה ומנהל הגשות עבודה בישראל." />
   <link rel="icon" href="/assets/brand/jobfinder-logo.png" />
@@ -625,7 +628,14 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
   <script src="/assets/app.js?v={_JS_VER}"></script>
 </body>
 </html>"""
-    return HTMLResponse(html)
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 def sidebar(active: str) -> str:
