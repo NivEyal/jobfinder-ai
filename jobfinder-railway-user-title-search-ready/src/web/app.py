@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import time
@@ -20,6 +21,18 @@ DEFAULT_CONFIG_PATH = "data_folder/work_preferences.yaml"
 
 app = FastAPI(title=APP_NAME)
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
+
+
+def _asset_ver(filename: str) -> str:
+    try:
+        content = Path(filename).read_bytes()
+        return hashlib.md5(content).hexdigest()[:8]
+    except OSError:
+        return "1"
+
+
+_CSS_VER = _asset_ver("assets/style.css")
+_JS_VER  = _asset_ver("assets/app.js")
 
 _config_cache: Dict[str, Any] = {}
 _config_cache_mtime: float = 0.0
@@ -568,7 +581,7 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/style.css" />
+  <link rel="stylesheet" href="/assets/style.css?v={_CSS_VER}" />
 </head>
 <body>
   <div id="page-progress"></div>
@@ -609,7 +622,7 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
     var _n = document.getElementById('main-nav');
     if (_h && _n) _h.addEventListener('click', function() {{ _h.classList.toggle('open'); _n.classList.toggle('open'); }});
   </script>
-  <script src="/assets/app.js"></script>
+  <script src="/assets/app.js?v={_JS_VER}"></script>
 </body>
 </html>"""
     return HTMLResponse(html)
