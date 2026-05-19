@@ -14,7 +14,6 @@ from src.apply import ApplicationRequest, ApplicationResult, AutoApplyEngine
 from src.israel_sources.search_engine import IsraelSearchEngine
 from src.job import Job
 from src.matching import JobMatcher, MatchResult
-from src.matching.openai_matcher import generate_ai_insights
 from src.matching.rule_based_matcher import RuleBasedMatcher
 from src.resume_schemas.israeli_resume import IsraeliResume
 from src.storage import JsonlStore, SQLiteStore
@@ -97,11 +96,15 @@ class DailyPipeline:
         config_path: str | Path = "data_folder/work_preferences.yaml",
         resume_path: str | Path = "data_folder/plain_text_resume.yaml",
         cover_letter_path: str | Path = "data_folder/cover_letter_template.txt",
+        runtime_keywords: List[str] | None = None,
     ):
         self.config_path = Path(config_path)
         self.profile_resume_path = Path(resume_path)
         self.cover_letter_path = Path(cover_letter_path)
         self.config = ConfigValidator.validate_config(self.config_path)
+        if runtime_keywords:
+            self.config["search"] = dict(self.config["search"])
+            self.config["search"]["keywords"] = [keyword for keyword in runtime_keywords if keyword]
         IsraeliResume.from_path(self.profile_resume_path)
         self.resume_path = self.resolve_resume_path()
         storage_config = self.config["storage"]
@@ -156,7 +159,7 @@ class DailyPipeline:
         threshold = automation["match_threshold"]
         throttle_every = int(automation.get("apply_throttle_every", 10))
         throttle_seconds = int(automation.get("apply_throttle_seconds", 3))
-        openai_max_jobs = int(self.config.get("matching", {}).get("openai_max_jobs_per_run", 50))
+        openai_max_jobs = int(self.config.get("matching", {}).get("openai_max_jobs_per_run", 20))
 
         for user in active_users:
             matcher = JobMatcher(self.user_config(user))
@@ -232,10 +235,7 @@ class DailyPipeline:
                     self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
 
         self.mark_old_jobs_inactive(days=automation["expire_after_days"])
-        try:
-            self.write_ai_insights(match_results, jobs)
-        except Exception:
-            pass
+        self.write_ai_insights(match_results, jobs)
         summary = PipelineSummary(
             automation_status=automation["status"],
             last_run_at=local_display_time(now),
@@ -269,55 +269,45 @@ class DailyPipeline:
         openai_max_jobs: int,
     ) -> List[tuple[Job, MatchResult]]:
         if not jobs:
-            self.write_progress("לא נמצאו משרות לדירוג", 0, 0, 100, "matching")
             return []
-
-        # Step 1: rule-based pre-filter (fast, local)
         self.write_progress("מסנן התאמות מקומית לפני OpenAI", len(jobs), len(jobs), 70, "matching")
         local_pairs = [(job, fallback_matcher.match(job, resume_text)) for job in jobs]
         local_pairs.sort(key=lambda item: item[1].score, reverse=True)
 
-        use_openai = (
-            self.config.get("matching", {}).get("provider", "openai") == "openai"
-            and openai_max_jobs > 0
-        )
-        if not use_openai:
+        if self.config.get("matching", {}).get("provider") != "openai" or openai_max_jobs <= 0:
             return local_pairs
 
-        # Step 2: OpenAI batch-ranks the top candidates
         top_jobs = [job for job, _ in local_pairs[:openai_max_jobs]]
-        self.write_progress(
-            f"שולח {len(top_jobs)} משרות מובילות ל-OpenAI לדירוג מדויק",
-            jobs_found=len(jobs),
-            target_jobs=len(jobs),
-            percent=75,
-            phase="matching",
-        )
-
+        max_workers = int(self.config.get("matching", {}).get("openai_max_workers", 6))
         openai_results: Dict[str, MatchResult] = {}
-        if self.cancel_requested():
-            self.write_progress("דירוג OpenAI נעצר לבקשת המשתמש", len(jobs), len(jobs), 100, "cancelled")
-        else:
-            try:
-                # Use batch API — groups into chunks of 8, far fewer API calls
-                batch_results = matcher.match_many(top_jobs, resume_text)
-                for result in batch_results:
-                    openai_results[result.job_fingerprint] = result
-                self.write_progress(
-                    f"OpenAI דירג {len(openai_results)} משרות",
-                    jobs_found=len(jobs),
-                    target_jobs=len(jobs),
-                    percent=95,
-                    phase="matching",
-                )
-            except Exception as exc:
-                self.write_progress(
-                    f"OpenAI נכשל, ממשיך עם דירוג מקומי: {exc}",
-                    jobs_found=len(jobs),
-                    target_jobs=len(jobs),
-                    percent=95,
-                    phase="matching",
-                )
+        executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
+        futures = {executor.submit(matcher.match, job, resume_text): job for job in top_jobs}
+        completed = 0
+        try:
+            pending = set(futures)
+            while pending:
+                if self.cancel_requested():
+                    self.write_progress("דירוג OpenAI נעצר לבקשת המשתמש", len(jobs), len(jobs), 100, "cancelled")
+                    break
+                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+                for future in done:
+                    completed += 1
+                    job = futures[future]
+                    try:
+                        openai_results[job.fingerprint] = future.result()
+                    except Exception:
+                        pass
+                    self.write_progress(
+                        f"מדרג התאמות עם OpenAI ({completed}/{len(top_jobs)})",
+                        jobs_found=len(jobs),
+                        target_jobs=len(jobs),
+                        percent=min(98, 75 + int(completed / max(len(top_jobs), 1) * 20)),
+                        phase="matching",
+                    )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         merged = [(job, openai_results.get(job.fingerprint, match)) for job, match in local_pairs]
         merged.sort(key=lambda item: item[1].score, reverse=True)
@@ -394,6 +384,9 @@ class DailyPipeline:
         return (output_dir / "cancel_search.flag").exists()
 
     def search_progress_callback(self, progress: Dict[str, Any]) -> None:
+        if progress.get("status") == "source_result":
+            self.write_source_diagnostic(progress)
+            return
         self.write_progress(
             f"בודק מקור: {progress.get('source', '')}",
             jobs_found=int(progress.get("jobs_found_so_far", 0)),
@@ -402,6 +395,20 @@ class DailyPipeline:
             phase=str(progress.get("phase", "searching")),
             source=str(progress.get("source", "")),
         )
+
+    def write_source_diagnostic(self, progress: Dict[str, Any]) -> None:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        diagnostics_path = output_dir / "search_diagnostics.jsonl"
+        record = {
+            "source": progress.get("source", ""),
+            "query": progress.get("query", ""),
+            "fetched_count": int(progress.get("fetched_count", 0)),
+            "accepted_count": int(progress.get("accepted_count", 0)),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with diagnostics_path.open("a", encoding="utf-8") as diagnostics:
+            diagnostics.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def write_progress(
         self,
@@ -412,40 +419,52 @@ class DailyPipeline:
         phase: str,
         source: str = "",
     ) -> None:
-        try:
-            output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
-            output_dir.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "message": message,
-                "phase": phase,
-                "source": source,
-                "jobs_found_so_far": jobs_found,
-                "target_jobs": target_jobs,
-                "percent": max(0, min(100, percent)),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            (output_dir / "job_search_progress.json").write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        progress_path = output_dir / "job_search_progress.json"
+        previous: Dict[str, Any] = {}
+        if progress_path.exists():
+            try:
+                previous = json.loads(progress_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                previous = {}
+        payload = {
+            "message": message,
+            "phase": phase,
+            "source": source,
+            "jobs_found_so_far": jobs_found,
+            "target_jobs": target_jobs,
+            "percent": max(0, min(100, percent)),
+            "run_id": previous.get("run_id", ""),
+            "search_title": previous.get("search_title", ""),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        progress_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def write_ai_insights(self, matches: List[MatchResult], jobs: List[Job]) -> None:
         output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
         output_dir.mkdir(parents=True, exist_ok=True)
         openai_used = sum(1 for match in matches if match.used_openai)
         top_matches = sorted(matches, key=lambda item: item.score, reverse=True)[:5]
-
-        resume_text = self.read_resume_text()
-        insights = generate_ai_insights(matches, jobs, resume_text, self.config)
-
+        missing = []
+        reasons = []
+        for match in top_matches:
+            missing.extend(match.missing_requirements[:3])
+            reasons.extend(match.reasons[:3])
         payload = {
             "openai_used": openai_used,
-            "model": self.config.get("matching", {}).get("model", "gpt-4o-mini"),
+            "model": self.config.get("matching", {}).get("model", ""),
             "jobs_analyzed": len(matches),
             "top_score": top_matches[0].score if top_matches else 0,
-            "insights": insights,
+            "insights": [
+                f"OpenAI ניתח {openai_used} מתוך {len(matches)} משרות מובילות; שאר המשרות דורגו מהר יותר עם fallback מקומי.",
+                f"ציון ההתאמה הגבוה ביותר כרגע הוא {top_matches[0].score if top_matches else 0}.",
+                f"דרישות שחוזרות במשרות מובילות: {', '.join(dict.fromkeys(missing[:5])) or 'אין מספיק נתונים עדיין'}.",
+                f"סיבות התאמה בולטות: {', '.join(dict.fromkeys(reasons[:5])) or 'אין מספיק נתונים עדיין'}.",
+            ],
         }
         (output_dir / "ai_insights.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -525,12 +544,25 @@ class DailyPipeline:
     def write_summary(self, summary: PipelineSummary) -> PipelineSummary:
         output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
         output_dir.mkdir(parents=True, exist_ok=True)
+        progress_path = output_dir / "job_search_progress.json"
+        run_meta: Dict[str, Any] = {}
+        if progress_path.exists():
+            try:
+                progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+                run_meta = {
+                    "run_id": progress_payload.get("run_id", ""),
+                    "search_title": progress_payload.get("search_title", ""),
+                }
+            except json.JSONDecodeError:
+                run_meta = {}
         (output_dir / "daily_summary.json").write_text(
             json.dumps(asdict(summary), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        user_status = summary.to_user_status()
+        user_status.update({key: value for key, value in run_meta.items() if value})
         (output_dir / "automation_status.json").write_text(
-            json.dumps(summary.to_user_status(), ensure_ascii=False, indent=2),
+            json.dumps(user_status, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         self.jsonl.append("pipeline_runs", asdict(summary))

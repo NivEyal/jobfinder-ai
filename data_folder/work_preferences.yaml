@@ -98,3 +98,116 @@ search:
   salary:
     currency: ILS
     min: 0
+    max: 100000
+  date_posted: all_time
+sources:
+  enabled:
+  - drushim
+  - alljobs
+  - jobmaster
+  - gotfriends
+  - indeed
+  - Jobnet
+  - company_careers
+  - remotive
+  - arbeitnow
+  - remoteok
+  - greenhouse
+  - lever
+  limits:
+    total_jobs: 2500
+    jobs_per_source: 200
+    max_pages: 12
+filters:
+  include:
+    must_have_keywords: []
+    nice_to_have_keywords:
+    - remote
+    - hybrid
+    - היברידי
+    - עבודה מהבית
+  exclude:
+    companies: []
+    titles: []
+    locations: []
+    keywords: []
+matching:
+  enabled: true
+  provider: openai
+  model: gpt-5-mini
+  api_key_env: OPENAI_API_KEY
+  fallback: rule_based
+  minimum_score: 65
+  strong_match_score: 80
+  possible_match_score: 60
+  openai_max_jobs_per_run: 20
+  openai_max_workers: 6
+  max_description_chars: 4000
+  timeout_seconds: 30
+apply:
+  enabled: true
+  dry_run: false
+  minimum_match_score: 65
+  require_resume_file: true
+  ledger_path: data_folder/output/applications_ledger.json
+  allowed_methods:
+  - email
+  - form
+  - external
+  email:
+    provider: resend
+    api_key_env: RESEND_API_KEY
+    api_url_env: RESEND_API_URL
+    from_email_env: RESEND_FROM_EMAIL
+    reply_to_env: APPLICATION_REPLY_TO_EMAIL
+    timeout_seconds: 30
+  form:
+    timeout_seconds: 20
+    submit_selector: button[type='submit'], input[type='submit']
+  external:
+    complex_indicators:
+    - captcha
+    - login
+    - signin
+    - questionnaire
+    - assessment
+storage:
+  enabled: true
+  backend: sqlite
+  sqlite_path: data_folder/output/jobs_storage.sqlite3
+  jsonl_dir: data_folder/output/jsonl
+  save_source_snapshots: true
+automation:
+  enabled: true
+  status: active
+  daily_time: 07:00
+  daily_application_limit: 100
+  apply_throttle_every: 10
+  apply_throttle_seconds: 3
+  application_mode: full_auto
+  match_threshold: 70
+  expire_after_days: 30
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  unlock_env: SUBSCRIPTION_ACTIVE
+  status_path: data_folder/output/subscription_status.json
+  webhook_secret_env: TAKBULL_WEBHOOK_SECRET
+  reveal_after_jobs_count: 1
+  blocked_actions:
+  - auto_apply
+users:
+- id: default
+  active: true
+  name: שם פרטי שם משפחה
+  email: candidate@example.com
+  phone: +972-50-123-4567
+  message: שלום, מצורפים קורות החיים שלי למשרה. אשמח לשוחח, תודה.
+  subscription:
+    active: false
+output:
+  save_raw_results: true
+  deduplicate: true
+  sort_by: last_seen_at
+  normalized_language: he
+  summary_dir: data_folder/output

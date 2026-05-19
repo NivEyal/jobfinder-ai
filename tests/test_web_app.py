@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.web.app import app, split_titles
+from src.web.app import app, debug_search, prepare_new_search_run, search_diagnostics, split_titles, status
 
 
 def test_home_page_is_branded_jobfinder():
@@ -76,6 +76,156 @@ subscription:
     assert response.status_code == 200
     assert response.json()["phase"] == "cancelled"
     assert (tmp_path / "output" / "cancel_search.flag").exists()
+
+
+def test_new_search_run_clears_stale_dashboard_results(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "automation_status.json").write_text(
+        json.dumps(
+            {
+                "status": "old",
+                "jobs_found_today": 99,
+                "application_inbox": [{"title": "Old Sales Manager"}],
+                "subscription_locked": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "daily_summary.json").write_text("{}", encoding="utf-8")
+    (output_dir / "ai_insights.json").write_text("{}", encoding="utf-8")
+    config = tmp_path / "work_preferences.yaml"
+    config.write_text(
+        """
+version: 4
+automation:
+  daily_application_limit: 100
+output:
+  summary_dir: "{tmp}/output"
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  status_path: "{tmp}/output/subscription_status.json"
+""".format(tmp=str(tmp_path).replace("\\", "/")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORK_PREFERENCES_PATH", str(config))
+
+    run_id = prepare_new_search_run("Backend Developer", target_jobs=100)
+    current = status()
+
+    assert run_id
+    assert (output_dir / "automation_status.json").exists()
+    assert not (output_dir / "daily_summary.json").exists()
+    assert not (output_dir / "ai_insights.json").exists()
+    assert (output_dir / "active_search_run.json").exists()
+    assert current["search_in_progress"] is True
+    assert current["jobs_found_today"] == 0
+    assert current["application_inbox"] == []
+    assert current["search_title"] == "Backend Developer"
+
+
+def test_status_refuses_stale_results_when_active_run_exists(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "active_search_run.json").write_text(
+        json.dumps({"run_id": "new-run", "search_title": "Backend Developer"}),
+        encoding="utf-8",
+    )
+    (output_dir / "automation_status.json").write_text(
+        json.dumps(
+            {
+                "run_id": "old-run",
+                "status": "old complete",
+                "jobs_found_today": 50,
+                "application_inbox": [{"title": "Old Sales Manager"}],
+                "subscription_locked": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = tmp_path / "work_preferences.yaml"
+    config.write_text(
+        """
+version: 4
+automation:
+  daily_application_limit: 100
+output:
+  summary_dir: "{tmp}/output"
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  status_path: "{tmp}/output/subscription_status.json"
+""".format(tmp=str(tmp_path).replace("\\", "/")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORK_PREFERENCES_PATH", str(config))
+
+    current = status()
+
+    assert current["jobs_found_today"] == 0
+    assert current["application_inbox"] == []
+    assert "ישנות לא מוצגות" in current["status"]
+
+
+def test_search_diagnostics_returns_records(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "active_search_run.json").write_text(
+        json.dumps({"run_id": "run-1", "search_title": "Backend Developer"}),
+        encoding="utf-8",
+    )
+    (output_dir / "search_diagnostics.jsonl").write_text(
+        json.dumps({"source": "jobmaster", "query": "Backend Developer", "fetched_count": 3, "accepted_count": 2})
+        + "\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "work_preferences.yaml"
+    config.write_text(
+        """
+version: 4
+output:
+  summary_dir: "{tmp}/output"
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  status_path: "{tmp}/output/subscription_status.json"
+""".format(tmp=str(tmp_path).replace("\\", "/")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORK_PREFERENCES_PATH", str(config))
+
+    payload = search_diagnostics()
+
+    assert payload["active_run"]["run_id"] == "run-1"
+    assert payload["records"][0]["source"] == "jobmaster"
+
+
+def test_debug_search_uses_runtime_title(monkeypatch):
+    class FakeEngine:
+        def __init__(self, sources, max_pages, progress_callback):
+            self.progress_callback = progress_callback
+
+        def search_from_plan(self, search_plan):
+            self.progress_callback(
+                {
+                    "status": "source_result",
+                    "source": "fake",
+                    "query": search_plan["queries"][0]["keywords"][0],
+                    "fetched_count": 1,
+                    "accepted_count": 1,
+                }
+            )
+            return []
+
+    monkeypatch.setattr("src.web.app.IsraelSearchEngine", FakeEngine)
+
+    payload = debug_search("Junior Economist", limit=5)
+
+    assert payload["ok"] is True
+    assert payload["runtime_keywords"] == ["Junior Economist"]
+    assert payload["plan_keywords"] == ["Junior Economist"]
+    assert payload["diagnostics"][0]["query"] == "Junior Economist"
 
 
 def test_takbull_webhook_unlocks_subscription(tmp_path, monkeypatch):

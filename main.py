@@ -313,9 +313,15 @@ class SearchPlanBuilder:
     @staticmethod
     def expand_keywords(keywords: List[str], aliases: Dict[str, List[str]]) -> List[str]:
         expanded = []
+        reverse_aliases: Dict[str, List[str]] = {}
+        for canonical, alias_values in aliases.items():
+            for alias in alias_values:
+                reverse_aliases.setdefault(alias, []).append(canonical)
+                reverse_aliases[alias].extend(alias_values)
         for keyword in keywords:
             expanded.append(keyword)
             expanded.extend(aliases.get(keyword, []))
+            expanded.extend(reverse_aliases.get(keyword, []))
         return SearchPlanBuilder.unique(expanded)
 
     @staticmethod
