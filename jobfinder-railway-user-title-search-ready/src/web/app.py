@@ -262,9 +262,26 @@ def root() -> HTMLResponse:
   var revealEls=document.querySelectorAll('.reveal');
   if(revealEls.length){{var io=new IntersectionObserver(function(e){{e.forEach(function(entry,i){{if(entry.isIntersecting){{setTimeout(function(){{entry.target.classList.add('visible');}},i*60);io.unobserve(entry.target);}}}});}},({{threshold:0.1}}));revealEls.forEach(function(el){{io.observe(el);}});}}
 </script>"""
+    full_html = f"""<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>JobFinder | מציאת עבודה והגשה חכמה</title>
+  <meta name="description" content="JobFinder מוצא משרות, מדרג התאמה ומנהל הגשות עבודה בישראל." />
+  <link rel="icon" href="/assets/brand/jobfinder-logo.png" />
+  <!-- DESIGN VERSION: v2-premium-2025 -->
+  <style>{css()}</style>
+</head>
+<body>
+{landing_html}
+</body>
+</html>"""
     return HTMLResponse(
-        landing_html,
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+        full_html,
+        headers={{"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}},
     )
 
 
