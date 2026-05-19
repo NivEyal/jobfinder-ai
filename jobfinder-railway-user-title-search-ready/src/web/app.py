@@ -779,39 +779,9 @@ async def takbull_webhook(request: Request) -> JSONResponse:
 
 
 def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
-    if landing:
-        header_html = ""
-        footer_html = ""
-    else:
-        header_html = f"""
-  <nav class="site-nav" id="site-nav">
-    <div class="nav-inner">
-      <a class="nav-brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="JobFinder" /><span>JobFinder</span></a>
-      <ul class="nav-links">
-        <li><a href="/dashboard">Dashboard</a></li>
-        <li><a href="/jobs">Jobs</a></li>
-        <li><a href="/inbox">Inbox</a></li>
-        <li><a href="/settings">Settings</a></li>
-        <li><a href="/upload-cv">Resume</a></li>
-      </ul>
-      <div class="nav-actions">
-        <a class="btn btn-primary btn-sm" href="/onboarding">הרץ עכשיו</a>
-        <button class="nav-hamburger" id="nav-hamburger"><span></span><span></span><span></span></button>
-      </div>
-    </div>
-    <div class="container"><div class="nav-mobile-menu" id="nav-mobile-menu">
-      <a href="/dashboard">Dashboard</a><a href="/jobs">Jobs</a>
-      <a href="/inbox">Inbox</a><a href="/settings">Settings</a><a href="/upload-cv">Resume</a>
-    </div></div>
-  </nav>"""
-        footer_html = f"""
-  <footer class="site-footer">
-    <div class="footer-inner">
-      <a class="footer-brand" href="/"><img src="/assets/brand/jobfinder-logo.png" alt="" /><span>JobFinder</span></a>
-      <ul class="footer-links"><li><a href="/">בית</a></li><li><a href="/dashboard">Dashboard</a></li><li><a href="/onboarding">התחל</a></li></ul>
-      <span class="footer-copy">&copy; 2025 JobFinder. כל הזכויות שמורות.</span>
-    </div>
-  </footer>"""
+    # No top navbar on app pages — sidebar handles navigation
+    header_html = ""
+    footer_html = ""
     html = f"""<!doctype html>
 <html lang="he" dir="rtl">
 <head>
@@ -925,9 +895,9 @@ def sidebar(active: str) -> str:
     items = [
         ("dashboard", "/dashboard", "Dashboard"),
         ("jobs", "/jobs", "Jobs"),
-        ("inbox", "/inbox", "Applications"),
-        ("resume", "/upload-cv", "Resume"),
+        ("inbox", "/inbox", "Inbox"),
         ("settings", "/settings", "Settings"),
+        ("resume", "/upload-cv", "Resume"),
     ]
     links = "".join(f"<a class='{'active' if key == active else ''}' href='{href}'>{label}</a>" for key, href, label in items)
     return f"<aside class='side'>{links}</aside>"
