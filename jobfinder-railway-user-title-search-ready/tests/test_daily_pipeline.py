@@ -93,6 +93,21 @@ def test_daily_pipeline_subscription_gate_blocks_after_showing_jobs(tmp_path):
     assert summary.matched_jobs == 2
 
 
+def test_daily_pipeline_runtime_keywords_override_config(tmp_path):
+    config_path = make_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["search"]["keywords"] = ["Software Engineer"]
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    pipeline = DailyPipeline(
+        config_path=config_path,
+        resume_path="data_folder/plain_text_resume.yaml",
+        runtime_keywords=["Junior Economist"],
+    )
+
+    assert pipeline.config["search"]["keywords"] == ["Junior Economist"]
+
+
 def test_apply_throttle_sleeps_after_every_batch(monkeypatch):
     calls = []
     monkeypatch.setattr("src.commands.daily_pipeline.time.sleep", lambda seconds: calls.append(seconds))

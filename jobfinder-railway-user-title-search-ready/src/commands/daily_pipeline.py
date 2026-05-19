@@ -96,11 +96,15 @@ class DailyPipeline:
         config_path: str | Path = "data_folder/work_preferences.yaml",
         resume_path: str | Path = "data_folder/plain_text_resume.yaml",
         cover_letter_path: str | Path = "data_folder/cover_letter_template.txt",
+        runtime_keywords: List[str] | None = None,
     ):
         self.config_path = Path(config_path)
         self.profile_resume_path = Path(resume_path)
         self.cover_letter_path = Path(cover_letter_path)
         self.config = ConfigValidator.validate_config(self.config_path)
+        if runtime_keywords:
+            self.config["search"] = dict(self.config["search"])
+            self.config["search"]["keywords"] = [keyword for keyword in runtime_keywords if keyword]
         IsraeliResume.from_path(self.profile_resume_path)
         self.resume_path = self.resolve_resume_path()
         storage_config = self.config["storage"]

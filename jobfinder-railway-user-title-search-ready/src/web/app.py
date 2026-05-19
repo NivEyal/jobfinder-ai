@@ -356,11 +356,13 @@ async def upload_cv(request: Request) -> RedirectResponse:
 async def run_pipeline_ui(request: Request) -> JSONResponse:
     form = await request.form()
     job_title = str(form.get("job_title", "")).strip()
+    runtime_keywords = split_titles(job_title)
     if job_title:
         update_search_titles(job_title)
     clear_cancel_flag()
-    run_id = prepare_new_search_run(job_title or current_search_title(), target_jobs=100)
-    start_background_pipeline(max_jobs=100)
+    search_title = ", ".join(runtime_keywords) if runtime_keywords else current_search_title()
+    run_id = prepare_new_search_run(search_title, target_jobs=100)
+    start_background_pipeline(max_jobs=100, runtime_keywords=runtime_keywords)
     return JSONResponse({"ok": True, "started": True, "run_id": run_id, "redirect": "/dashboard"})
 
 
@@ -372,8 +374,9 @@ def apply_all_ui() -> JSONResponse:
     config["apply"]["dry_run"] = False
     Path(config_path()).write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
     clear_cancel_flag()
+    runtime_keywords = split_titles(current_search_title())
     run_id = prepare_new_search_run(current_search_title(), target_jobs=100)
-    start_background_pipeline(max_jobs=100)
+    start_background_pipeline(max_jobs=100, runtime_keywords=runtime_keywords)
     return JSONResponse({"ok": True, "started": True, "run_id": run_id, "redirect": "/dashboard"})
 
 
@@ -650,10 +653,10 @@ def update_search_titles(raw_value: str) -> None:
     path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
-def start_background_pipeline(max_jobs: int = 100) -> None:
+def start_background_pipeline(max_jobs: int = 100, runtime_keywords: list[str] | None = None) -> None:
     def runner() -> None:
         try:
-            DailyPipeline(config_path=config_path()).run(max_jobs=max_jobs)
+            DailyPipeline(config_path=config_path(), runtime_keywords=runtime_keywords).run(max_jobs=max_jobs)
         except Exception as exc:
             config = load_config()
             output_dir = Path(config["output"].get("summary_dir", "data_folder/output"))
