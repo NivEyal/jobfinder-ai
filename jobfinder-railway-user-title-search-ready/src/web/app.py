@@ -798,6 +798,7 @@ def page(title: str, body: str, landing: bool = False) -> HTMLResponse:
   <meta name="description" content="JobFinder מוצא משרות, מדרג התאמה ומנהל הגשות עבודה בישראל." />
   <link rel="icon" href="/assets/brand/jobfinder-logo.png" />
   <style>{css()}</style>
+  <!-- DESIGN VERSION: v2-premium-2025 -->
 </head>
 <body>
   {header_html}
