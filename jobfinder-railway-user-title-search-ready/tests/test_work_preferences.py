@@ -60,3 +60,12 @@ def test_search_engine_accepts_configured_sources_and_pagination():
         "lever",
     ]
     assert all(adapter.max_pages == 12 for adapter in engine.adapters)
+
+
+def test_keyword_aliases_expand_bidirectionally():
+    config = ConfigValidator.validate_config(Path("data_folder/work_preferences.yaml"))
+    config["search"]["keywords"] = ["מפתח תוכנה"]
+    plan = SearchPlanBuilder.build(config)
+
+    assert "Software Engineer" in plan["keywords"]
+    assert "מפתח תוכנה" in plan["keywords"]

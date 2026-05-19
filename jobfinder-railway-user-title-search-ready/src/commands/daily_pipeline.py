@@ -98,3 +98,475 @@ class DailyPipeline:
         cover_letter_path: str | Path = "data_folder/cover_letter_template.txt",
     ):
         self.config_path = Path(config_path)
+        self.profile_resume_path = Path(resume_path)
+        self.cover_letter_path = Path(cover_letter_path)
+        self.config = ConfigValidator.validate_config(self.config_path)
+        IsraeliResume.from_path(self.profile_resume_path)
+        self.resume_path = self.resolve_resume_path()
+        storage_config = self.config["storage"]
+        self.store = SQLiteStore(storage_config["sqlite_path"])
+        self.jsonl = JsonlStore(storage_config["jsonl_dir"])
+        self.subscription_gate = SubscriptionGate(self.config)
+
+    def run(self, jobs_override: Iterable[Any] | None = None, max_jobs: int | None = None) -> PipelineSummary:
+        now = datetime.now(timezone.utc)
+        automation = self.config["automation"]
+        active_users = self.load_active_users()
+        if not automation["enabled"] or automation["status"] != "active":
+            summary = self.empty_summary(now, "paused")
+            return self.write_summary(summary)
+
+        search_plan = SearchPlanBuilder.build(self.config)
+        if max_jobs is not None:
+            self.write_progress("מתחיל חיפוש משרות", jobs_found=0, target_jobs=max_jobs, percent=1, phase="starting")
+        source_name = "pipeline"
+        run_id = self.store.start_ingestion_run(source_name, search_plan)
+        try:
+            israeli_jobs = list(jobs_override) if jobs_override is not None else self.fetch_jobs(search_plan, max_jobs=max_jobs)
+            if max_jobs is not None:
+                israeli_jobs = israeli_jobs[:max_jobs]
+            jobs = self.normalize_and_dedupe(israeli_jobs)
+            saved = self.store.save_jobs(jobs)
+            self.store.finish_ingestion_run(run_id, "success", jobs_found=len(jobs), jobs_saved=saved)
+            if self.cancel_requested():
+                self.write_progress("החיפוש נעצר. נשמרו המשרות שנמצאו עד עכשיו.", jobs_found=len(jobs), target_jobs=max_jobs or len(jobs), percent=100, phase="cancelled")
+            else:
+                self.write_progress("החיפוש הסתיים, מתחיל דירוג התאמות", jobs_found=len(jobs), target_jobs=max_jobs or len(jobs), percent=100, phase="matching")
+        except Exception as exc:
+            self.write_progress(f"שגיאה בחיפוש: {exc}", jobs_found=0, target_jobs=max_jobs or 0, percent=100, phase="failed")
+            self.store.record_ingestion_error(source_name, search_plan, exc, run_id=run_id)
+            self.store.finish_ingestion_run(run_id, "failed", jobs_found=0, jobs_saved=0)
+            raise
+
+        blocked_user = next((user for user in active_users if self.subscription_gate.should_block(len(jobs), user)), None)
+        gate_payload = self.subscription_gate.status_payload(len(jobs)) if blocked_user else None
+
+        inbox: List[Dict[str, Any]] = []
+        sent = 0
+        requires_approval = 0
+        rejected = 0
+        requires_manual = 0
+        failed = 0
+        matched_jobs = 0
+        daily_limit_used = 0
+        apply_attempts = 0
+        match_results: List[MatchResult] = []
+        daily_limit = automation["daily_application_limit"]
+        threshold = automation["match_threshold"]
+        throttle_every = int(automation.get("apply_throttle_every", 10))
+        throttle_seconds = int(automation.get("apply_throttle_seconds", 3))
+        openai_max_jobs = int(self.config.get("matching", {}).get("openai_max_jobs_per_run", 20))
+
+        for user in active_users:
+            matcher = JobMatcher(self.user_config(user))
+            fallback_matcher = RuleBasedMatcher(self.user_config(user))
+            apply_engine = AutoApplyEngine(self.user_config(user))
+            resume_text = self.read_resume_text()
+            matched_pairs = self.match_jobs_fast(jobs, matcher, fallback_matcher, resume_text, openai_max_jobs)
+            for index, (job, match) in enumerate(matched_pairs, start=1):
+                if self.cancel_requested():
+                    self.write_progress("הפעולה נעצרה. נשמרו המשרות שנמצאו עד עכשיו.", len(jobs), len(jobs), 100, "cancelled")
+                    break
+                match_results.append(match)
+                if index == 1 or index % 5 == 0:
+                    self.write_progress(
+                        "מכין הגשות לפי דירוג ההתאמה",
+                        jobs_found=len(jobs),
+                        target_jobs=len(jobs),
+                        percent=min(99, 70 + int(index / max(len(jobs), 1) * 25)),
+                        phase="matching",
+                    )
+                if match.score < threshold:
+                    rejected += 1
+                    inbox.append(self.inbox_item(job, match, "blocked", "score below threshold"))
+                    continue
+                matched_jobs += 1
+                if gate_payload and "auto_apply" in self.config["subscription"].get("blocked_actions", []):
+                    requires_approval += 1
+                    inbox.append(self.inbox_item(job, match, "payment_required", gate_payload["message"]))
+                    continue
+                if daily_limit_used >= daily_limit:
+                    requires_approval += 1
+                    inbox.append(self.inbox_item(job, match, "pending_approval", "daily limit reached"))
+                    continue
+                mode = automation["application_mode"]
+                if mode == "save_matches_only":
+                    inbox.append(self.inbox_item(job, match, "saved_match", "match saved only"))
+                    continue
+                if mode == "approval_before_send":
+                    requires_approval += 1
+                    inbox.append(self.inbox_item(job, match, "pending_approval", "approval required before sending"))
+                    continue
+                try:
+                    apply_attempts += 1
+                    result = apply_engine.apply(
+                        ApplicationRequest(
+                            job=job,
+                            resume_path=self.resume_path,
+                            cover_letter_path=self.cover_letter_path,
+                            candidate_name=user.get("name", ""),
+                            candidate_email=user.get("email", ""),
+                            candidate_phone=user.get("phone", ""),
+                            message=user.get("message", "Please see my attached resume."),
+                            match_result=match,
+                        )
+                    )
+                    inbox.append(self.inbox_item(job, match, result.status, result.detail, result))
+                    if result.status == "submitted":
+                        sent += 1
+                        daily_limit_used += 1
+                    elif result.status == "dry_run_ready":
+                        daily_limit_used += 1
+                    elif result.status in {"requires_adapter", "requires_manual"}:
+                        requires_manual += 1
+                    elif result.status == "blocked":
+                        rejected += 1
+                    elif result.status == "failed":
+                        failed += 1
+                    self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
+                except Exception as exc:
+                    failed += 1
+                    self.store.record_ingestion_error("auto_apply", {"job": job.fingerprint}, exc)
+                    inbox.append(self.inbox_item(job, match, "failed", str(exc)))
+                    self.throttle_apply(apply_attempts, throttle_every, throttle_seconds)
+
+        self.mark_old_jobs_inactive(days=automation["expire_after_days"])
+        self.write_ai_insights(match_results, jobs)
+        summary = PipelineSummary(
+            automation_status=automation["status"],
+            last_run_at=local_display_time(now),
+            next_run_at=self.next_run_display(now),
+            jobs_found_today=len(jobs),
+            applications_sent_today=sent,
+            requires_approval=requires_approval,
+            daily_limit_used=daily_limit_used,
+            daily_limit=daily_limit,
+            matched_jobs=matched_jobs,
+            rejected_by_rules=rejected,
+            requires_manual=requires_manual,
+            failed=failed,
+            mode=automation["application_mode"],
+            threshold=threshold,
+            subscription_required=bool(gate_payload),
+            subscription_locked=bool(gate_payload),
+            subscription_pay_url=gate_payload["pay_url"] if gate_payload else "",
+            subscription_message=gate_payload["message"] if gate_payload else "",
+            inbox=inbox[:100],
+        )
+        self.write_progress("הפעולה הסתיימה. המשרות נשמרו בדשבורד.", len(jobs), len(jobs), 100, "complete")
+        return self.write_summary(summary)
+
+    def match_jobs_fast(
+        self,
+        jobs: List[Job],
+        matcher: JobMatcher,
+        fallback_matcher: RuleBasedMatcher,
+        resume_text: str,
+        openai_max_jobs: int,
+    ) -> List[tuple[Job, MatchResult]]:
+        if not jobs:
+            return []
+        self.write_progress("מסנן התאמות מקומית לפני OpenAI", len(jobs), len(jobs), 70, "matching")
+        local_pairs = [(job, fallback_matcher.match(job, resume_text)) for job in jobs]
+        local_pairs.sort(key=lambda item: item[1].score, reverse=True)
+
+        if self.config.get("matching", {}).get("provider") != "openai" or openai_max_jobs <= 0:
+            return local_pairs
+
+        top_jobs = [job for job, _ in local_pairs[:openai_max_jobs]]
+        max_workers = int(self.config.get("matching", {}).get("openai_max_workers", 6))
+        openai_results: Dict[str, MatchResult] = {}
+        executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
+        futures = {executor.submit(matcher.match, job, resume_text): job for job in top_jobs}
+        completed = 0
+        try:
+            pending = set(futures)
+            while pending:
+                if self.cancel_requested():
+                    self.write_progress("דירוג OpenAI נעצר לבקשת המשתמש", len(jobs), len(jobs), 100, "cancelled")
+                    break
+                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+                for future in done:
+                    completed += 1
+                    job = futures[future]
+                    try:
+                        openai_results[job.fingerprint] = future.result()
+                    except Exception:
+                        pass
+                    self.write_progress(
+                        f"מדרג התאמות עם OpenAI ({completed}/{len(top_jobs)})",
+                        jobs_found=len(jobs),
+                        target_jobs=len(jobs),
+                        percent=min(98, 75 + int(completed / max(len(top_jobs), 1) * 20)),
+                        phase="matching",
+                    )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        merged = [(job, openai_results.get(job.fingerprint, match)) for job, match in local_pairs]
+        merged.sort(key=lambda item: item[1].score, reverse=True)
+        return merged
+
+    def load_active_users(self) -> List[Dict[str, Any]]:
+        users = self.config.get("users", [])
+        active = [user for user in users if user.get("active", True)]
+        if active:
+            return active
+        personal = IsraeliResume.from_path(self.profile_resume_path).data["personal_information"]
+        return [
+            {
+                "id": "default",
+                "active": True,
+                "name": f"{personal.get('first_name', '')} {personal.get('last_name', '')}".strip(),
+                "email": personal.get("email", ""),
+                "phone": personal.get("phone", ""),
+            }
+        ]
+
+    def user_config(self, user: Dict[str, Any]) -> Dict[str, Any]:
+        config = dict(self.config)
+        config["apply"] = dict(self.config["apply"])
+        config["apply"]["dry_run"] = self.config["automation"]["application_mode"] != "full_auto" or self.config["apply"]["dry_run"]
+        return config
+
+    def resolve_resume_path(self) -> Path:
+        configured = self.config.get("output", {}).get("resume_upload_path", "")
+        if configured and Path(configured).exists():
+            return Path(configured)
+        return self.profile_resume_path
+
+    def read_resume_text(self) -> str:
+        try:
+            return self.resume_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, FileNotFoundError):
+            return IsraeliResume.from_path(self.profile_resume_path).render_text("en")
+
+    @staticmethod
+    def throttle_apply(apply_attempts: int, throttle_every: int, throttle_seconds: int) -> None:
+        if throttle_every <= 0 or throttle_seconds <= 0:
+            return
+        if apply_attempts > 0 and apply_attempts % throttle_every == 0:
+            time.sleep(throttle_seconds)
+
+    def fetch_jobs(self, search_plan: Dict[str, Any], max_jobs: int | None = None) -> List[Any]:
+        if max_jobs is not None:
+            search_plan = dict(search_plan)
+            search_plan["total_limit"] = max_jobs
+            search_plan["jobs_per_source"] = min(search_plan.get("jobs_per_source", max_jobs), max_jobs)
+            search_plan["max_pages"] = min(search_plan.get("max_pages", 1), 1)
+            search_plan["max_workers"] = 12
+            search_plan["max_tasks"] = 36
+            priority_sources = ["remotive", "arbeitnow", "remoteok", "greenhouse", "lever"]
+            configured_sources = search_plan.get("sources", [])
+            search_plan["sources"] = [
+                source for source in priority_sources if source in configured_sources
+            ] + [source for source in configured_sources if source not in priority_sources]
+            search_plan["queries"] = [
+                {**query, "limit": min(query.get("limit", max_jobs), max_jobs)}
+                for query in search_plan.get("queries", [])
+            ]
+        engine = IsraelSearchEngine(
+            sources=search_plan["sources"],
+            max_pages=search_plan["max_pages"],
+            progress_callback=self.search_progress_callback,
+            cancel_callback=self.cancel_requested,
+        )
+        return engine.search_from_plan(search_plan)
+
+    def cancel_requested(self) -> bool:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        return (output_dir / "cancel_search.flag").exists()
+
+    def search_progress_callback(self, progress: Dict[str, Any]) -> None:
+        if progress.get("status") == "source_result":
+            self.write_source_diagnostic(progress)
+            return
+        self.write_progress(
+            f"בודק מקור: {progress.get('source', '')}",
+            jobs_found=int(progress.get("jobs_found_so_far", 0)),
+            target_jobs=int(progress.get("target_jobs", 100)),
+            percent=int(progress.get("percent", 1)),
+            phase=str(progress.get("phase", "searching")),
+            source=str(progress.get("source", "")),
+        )
+
+    def write_source_diagnostic(self, progress: Dict[str, Any]) -> None:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        diagnostics_path = output_dir / "search_diagnostics.jsonl"
+        record = {
+            "source": progress.get("source", ""),
+            "query": progress.get("query", ""),
+            "fetched_count": int(progress.get("fetched_count", 0)),
+            "accepted_count": int(progress.get("accepted_count", 0)),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with diagnostics_path.open("a", encoding="utf-8") as diagnostics:
+            diagnostics.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def write_progress(
+        self,
+        message: str,
+        jobs_found: int,
+        target_jobs: int,
+        percent: int,
+        phase: str,
+        source: str = "",
+    ) -> None:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        progress_path = output_dir / "job_search_progress.json"
+        previous: Dict[str, Any] = {}
+        if progress_path.exists():
+            try:
+                previous = json.loads(progress_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                previous = {}
+        payload = {
+            "message": message,
+            "phase": phase,
+            "source": source,
+            "jobs_found_so_far": jobs_found,
+            "target_jobs": target_jobs,
+            "percent": max(0, min(100, percent)),
+            "run_id": previous.get("run_id", ""),
+            "search_title": previous.get("search_title", ""),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        progress_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def write_ai_insights(self, matches: List[MatchResult], jobs: List[Job]) -> None:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        openai_used = sum(1 for match in matches if match.used_openai)
+        top_matches = sorted(matches, key=lambda item: item.score, reverse=True)[:5]
+        missing = []
+        reasons = []
+        for match in top_matches:
+            missing.extend(match.missing_requirements[:3])
+            reasons.extend(match.reasons[:3])
+        payload = {
+            "openai_used": openai_used,
+            "model": self.config.get("matching", {}).get("model", ""),
+            "jobs_analyzed": len(matches),
+            "top_score": top_matches[0].score if top_matches else 0,
+            "insights": [
+                f"OpenAI ניתח {openai_used} מתוך {len(matches)} משרות מובילות; שאר המשרות דורגו מהר יותר עם fallback מקומי.",
+                f"ציון ההתאמה הגבוה ביותר כרגע הוא {top_matches[0].score if top_matches else 0}.",
+                f"דרישות שחוזרות במשרות מובילות: {', '.join(dict.fromkeys(missing[:5])) or 'אין מספיק נתונים עדיין'}.",
+                f"סיבות התאמה בולטות: {', '.join(dict.fromkeys(reasons[:5])) or 'אין מספיק נתונים עדיין'}.",
+            ],
+        }
+        (output_dir / "ai_insights.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def normalize_and_dedupe(self, israeli_jobs: Iterable[Any]) -> List[Job]:
+        normalized_language = self.config["output"]["normalized_language"]
+        jobs: List[Job] = []
+        seen = set()
+        for israeli_job in israeli_jobs:
+            job = israeli_job.to_job(normalized_output_language=normalized_language)
+            if job.fingerprint in seen:
+                continue
+            seen.add(job.fingerprint)
+            jobs.append(job)
+        return jobs
+
+    def mark_old_jobs_inactive(self, days: int):
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with self.store.connect() as conn:
+            conn.execute("UPDATE jobs SET status = 'expired' WHERE last_seen_at < ?", (cutoff,))
+
+    def inbox_item(
+        self,
+        job: Job,
+        match: MatchResult,
+        status: str,
+        detail: str,
+        result: ApplicationResult | None = None,
+    ) -> Dict[str, Any]:
+        item = {
+            "status": status,
+            "status_label": STATUS_LABELS_HE.get(status, status),
+            "title": job.title,
+            "company": job.company,
+            "source": job.source,
+            "source_job_id": job.source_job_id,
+            "score": match.score,
+            "detail": detail,
+            "apply_url": job.apply_url,
+            "apply_email": job.apply_email,
+        }
+        if result:
+            item["method"] = result.method
+            item["target"] = result.target
+        return item
+
+    def empty_summary(self, now: datetime, status: str) -> PipelineSummary:
+        automation = self.config["automation"]
+        return PipelineSummary(
+            automation_status=status,
+            last_run_at=local_display_time(now),
+            next_run_at=self.next_run_display(now),
+            jobs_found_today=0,
+            applications_sent_today=0,
+            requires_approval=0,
+            daily_limit_used=0,
+            daily_limit=automation["daily_application_limit"],
+            matched_jobs=0,
+            rejected_by_rules=0,
+            requires_manual=0,
+            failed=0,
+            mode=automation["application_mode"],
+            threshold=automation["match_threshold"],
+            inbox=[],
+        )
+
+    def next_run_display(self, now: datetime) -> str:
+        hour, minute = [int(part) for part in self.config["automation"]["daily_time"].split(":")]
+        local_now = now.astimezone()
+        next_run = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if next_run <= local_now:
+            next_run += timedelta(days=1)
+        return local_display_time(next_run)
+
+    def write_summary(self, summary: PipelineSummary) -> PipelineSummary:
+        output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "daily_summary.json").write_text(
+            json.dumps(asdict(summary), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (output_dir / "automation_status.json").write_text(
+            json.dumps(summary.to_user_status(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self.jsonl.append("pipeline_runs", asdict(summary))
+        return summary
+
+
+def local_display_time(value: datetime) -> str:
+    return value.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the full daily Israeli jobs pipeline.")
+    parser.add_argument("--config", default="data_folder/work_preferences.yaml")
+    parser.add_argument("--resume", default="data_folder/plain_text_resume.yaml")
+    parser.add_argument("--cover-letter", default="data_folder/cover_letter_template.txt")
+    parser.add_argument("--max-jobs", type=int, default=None)
+    args = parser.parse_args()
+    summary = DailyPipeline(args.config, args.resume, args.cover_letter).run(max_jobs=args.max_jobs)
+    print(json.dumps(summary.to_user_status(), ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
