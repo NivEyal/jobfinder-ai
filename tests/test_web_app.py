@@ -201,6 +201,33 @@ subscription:
     assert payload["records"][0]["source"] == "jobmaster"
 
 
+def test_status_tolerates_partially_written_progress_file(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "job_search_progress.json").write_text("", encoding="utf-8")
+    config = tmp_path / "work_preferences.yaml"
+    config.write_text(
+        """
+version: 4
+automation:
+  daily_application_limit: 100
+output:
+  summary_dir: "{tmp}/output"
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  status_path: "{tmp}/output/subscription_status.json"
+""".format(tmp=str(tmp_path).replace("\\", "/")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORK_PREFERENCES_PATH", str(config))
+
+    current = status()
+
+    assert current["jobs_found_today"] == 0
+    assert current["application_inbox"] == []
+
+
 def test_debug_search_uses_runtime_title(monkeypatch):
     class FakeEngine:
         def __init__(self, sources, max_pages, progress_callback):

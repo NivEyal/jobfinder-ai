@@ -1,5 +1,6 @@
 import argparse
 import json
+import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
@@ -425,7 +426,8 @@ class DailyPipeline:
         previous: Dict[str, Any] = {}
         if progress_path.exists():
             try:
-                previous = json.loads(progress_path.read_text(encoding="utf-8"))
+                text = progress_path.read_text(encoding="utf-8").strip()
+                previous = json.loads(text) if text else {}
             except json.JSONDecodeError:
                 previous = {}
         payload = {
@@ -439,10 +441,7 @@ class DailyPipeline:
             "search_title": previous.get("search_title", ""),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        progress_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(progress_path, payload)
 
     def write_ai_insights(self, matches: List[MatchResult], jobs: List[Job]) -> None:
         output_dir = Path(self.config["output"].get("summary_dir", "data_folder/output"))
@@ -466,10 +465,7 @@ class DailyPipeline:
                 f"סיבות התאמה בולטות: {', '.join(dict.fromkeys(reasons[:5])) or 'אין מספיק נתונים עדיין'}.",
             ],
         }
-        (output_dir / "ai_insights.json").write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(output_dir / "ai_insights.json", payload)
 
     def normalize_and_dedupe(self, israeli_jobs: Iterable[Any]) -> List[Job]:
         normalized_language = self.config["output"]["normalized_language"]
@@ -548,29 +544,38 @@ class DailyPipeline:
         run_meta: Dict[str, Any] = {}
         if progress_path.exists():
             try:
-                progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+                text = progress_path.read_text(encoding="utf-8").strip()
+                progress_payload = json.loads(text) if text else {}
                 run_meta = {
                     "run_id": progress_payload.get("run_id", ""),
                     "search_title": progress_payload.get("search_title", ""),
                 }
             except json.JSONDecodeError:
                 run_meta = {}
-        (output_dir / "daily_summary.json").write_text(
-            json.dumps(asdict(summary), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(output_dir / "daily_summary.json", asdict(summary))
         user_status = summary.to_user_status()
         user_status.update({key: value for key, value in run_meta.items() if value})
-        (output_dir / "automation_status.json").write_text(
-            json.dumps(user_status, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(output_dir / "automation_status.json", user_status)
         self.jsonl.append("pipeline_runs", asdict(summary))
         return summary
 
 
 def local_display_time(value: datetime) -> str:
     return value.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.{threading.get_ident()}.{datetime.now(timezone.utc).timestamp()}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    for attempt in range(5):
+        try:
+            temp_path.replace(path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def main() -> int:

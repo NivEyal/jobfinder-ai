@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -392,7 +393,7 @@ def cancel_search() -> Dict[str, Any]:
     found = 0
     target = 100
     if progress_path.exists():
-        current = json.loads(progress_path.read_text(encoding="utf-8"))
+        current = read_json_file(progress_path, {})
         found = int(current.get("jobs_found_so_far", 0))
         target = int(current.get("target_jobs", 100))
     payload = {
@@ -403,7 +404,7 @@ def cancel_search() -> Dict[str, Any]:
         "percent": 100,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    progress_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_file(progress_path, payload)
     return payload
 
 
@@ -413,12 +414,12 @@ def status() -> Dict[str, Any]:
     output_dir = Path(config["output"].get("summary_dir", "data_folder/output"))
     progress_path = output_dir / "job_search_progress.json"
     if progress_path.exists():
-        progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+        progress_payload = read_json_file(progress_path, {})
         if progress_payload.get("phase") in {"starting", "searching", "matching", "failed", "cancelled"}:
             return in_progress_status(config, progress_payload)
     status_path = output_dir / "automation_status.json"
     if status_path.exists():
-        payload = json.loads(status_path.read_text(encoding="utf-8"))
+        payload = read_json_file(status_path, {})
         active_run = active_search_run(output_dir)
         if active_run and payload.get("run_id") != active_run.get("run_id"):
             return empty_fresh_status(config, "ממתין לחיפוש חדש. תוצאות ישנות לא מוצגות.")
@@ -440,7 +441,7 @@ def progress() -> Dict[str, Any]:
     config = load_config()
     progress_path = Path(config["output"].get("summary_dir", "data_folder/output")) / "job_search_progress.json"
     if progress_path.exists():
-        return json.loads(progress_path.read_text(encoding="utf-8"))
+        return read_json_file(progress_path, {})
     return {
         "message": "ממתין להתחלת חיפוש",
         "phase": "idle",
@@ -559,7 +560,7 @@ async def takbull_webhook(request: Request) -> JSONResponse:
     }
     status_path = Path(subscription["status_path"])
     status_path.parent.mkdir(parents=True, exist_ok=True)
-    status_path.write_text(json.dumps(status_record, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_file(status_path, status_record)
     return JSONResponse({"ok": True, "subscription_active": active, "payment_status": payment_status})
 
 
@@ -731,10 +732,7 @@ def start_background_pipeline(max_jobs: int = 100, runtime_keywords: list[str] |
                 "percent": 100,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            (output_dir / "job_search_progress.json").write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            write_json_file(output_dir / "job_search_progress.json", payload)
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
@@ -755,10 +753,7 @@ def prepare_new_search_run(search_title: str, target_jobs: int = 100) -> str:
         "target_jobs": target_jobs,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
-    (output_dir / "active_search_run.json").write_text(
-        json.dumps(active_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_file(output_dir / "active_search_run.json", active_payload)
     payload = {
         "message": "מתחיל חיפוש חדש. תוצאות ישנות נוקו ולא יוצגו.",
         "phase": "starting",
@@ -770,14 +765,8 @@ def prepare_new_search_run(search_title: str, target_jobs: int = 100) -> str:
         "search_title": search_title,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    (output_dir / "job_search_progress.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    (output_dir / "automation_status.json").write_text(
-        json.dumps(in_progress_status(config, payload), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_file(output_dir / "job_search_progress.json", payload)
+    write_json_file(output_dir / "automation_status.json", in_progress_status(config, payload))
     return run_id
 
 
@@ -801,7 +790,7 @@ def in_progress_status(config: Dict[str, Any], progress_payload: Dict[str, Any])
         "subscription_locked": is_subscription_locked(config),
         "subscription_pay_url": config["subscription"]["pay_url"],
         "application_inbox": [],
-        "search_in_progress": True,
+        "search_in_progress": phase in {"starting", "searching", "matching"},
         "search_title": progress_payload.get("search_title", ""),
         "run_id": progress_payload.get("run_id", ""),
     }
@@ -827,10 +816,7 @@ def active_search_run(output_dir: Path) -> Dict[str, Any]:
     path = output_dir / "active_search_run.json"
     if not path.exists():
         return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+    return read_json_file(path, {})
 
 
 def ai_insights_html() -> str:
@@ -855,6 +841,31 @@ def clear_cancel_flag() -> None:
     flag = Path(config["output"].get("summary_dir", "data_folder/output")) / "cancel_search.flag"
     if flag.exists():
         flag.unlink()
+
+
+def read_json_file(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return default
+        payload = json.loads(text)
+        return payload if isinstance(payload, dict) else default
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return default
+
+
+def write_json_file(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.{threading.get_ident()}.{datetime.now(timezone.utc).timestamp()}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    for attempt in range(5):
+        try:
+            temp_path.replace(path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def current_search_title() -> str:
@@ -1005,6 +1016,6 @@ def is_subscription_locked(config: Dict[str, Any]) -> bool:
     if not status_path.exists():
         return bool(config["subscription"].get("enabled", True))
     try:
-        return not bool(json.loads(status_path.read_text(encoding="utf-8")).get("active"))
-    except json.JSONDecodeError:
+        return not bool(read_json_file(status_path, {}).get("active"))
+    except OSError:
         return True

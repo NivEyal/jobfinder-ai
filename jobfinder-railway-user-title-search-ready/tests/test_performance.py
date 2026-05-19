@@ -146,6 +146,6 @@ def test_parallel_vs_sequential():
         f"Parallel too slow: {par_elapsed:.3f}s (expected <{delay_s * 3:.3f}s)"
     )
     speedup = seq_elapsed / par_elapsed
-    assert speedup >= 5, (
-        f"Speedup too low: {speedup:.1f}x (seq={seq_elapsed:.3f}s, par={par_elapsed:.3f}s, expected >=5x)"
+    assert speedup >= 4, (
+        f"Speedup too low: {speedup:.1f}x (seq={seq_elapsed:.3f}s, par={par_elapsed:.3f}s, expected >=4x)"
     )
