@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 import yaml
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from main import SearchPlanBuilder
@@ -338,8 +338,19 @@ def upload_cv_page() -> HTMLResponse:
 
 
 @app.post("/upload-cv")
-async def upload_cv(request: Request) -> RedirectResponse:
-    form = await request.form()
+async def upload_cv(request: Request) -> Response:
+    try:
+        form = await request.form()
+    except AssertionError as exc:
+        if "python-multipart" not in str(exc):
+            raise
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Resume upload requires the python-multipart package. Install requirements and restart the server.",
+            },
+            status_code=500,
+        )
     resume = form.get("resume")
     uploads_dir = Path("data_folder/output/uploads")
     uploads_dir.mkdir(parents=True, exist_ok=True)

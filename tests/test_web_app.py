@@ -26,6 +26,51 @@ def test_product_pages_load():
         assert "JobFinder" in response.text
 
 
+def test_upload_cv_saves_resume_and_search_title(tmp_path, monkeypatch):
+    config = tmp_path / "work_preferences.yaml"
+    config.write_text(
+        """
+version: 4
+automation:
+  daily_application_limit: 100
+  application_mode: approval_before_send
+  match_threshold: 80
+  status: active
+  daily_time: "09:00"
+apply:
+  dry_run: true
+search:
+  keywords:
+  - Software Engineer
+output:
+  summary_dir: "{tmp}/output"
+subscription:
+  enabled: true
+  pay_url: https://paypage.takbull.co.il/2dBbl
+  status_path: "{tmp}/output/subscription_status.json"
+""".format(tmp=str(tmp_path).replace("\\", "/")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORK_PREFERENCES_PATH", str(config))
+    client = TestClient(app)
+
+    response = client.post(
+        "/upload-cv",
+        data={"job_title": "QA Engineer"},
+        files={"resume": ("resume.txt", b"resume text", "text/plain")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/dashboard"
+    config_text = config.read_text(encoding="utf-8")
+    assert "QA Engineer" in config_text
+    assert "data_folder/output/uploads/resume.txt" in config_text
+    uploaded_path = Path("data_folder/output/uploads/resume.txt")
+    assert uploaded_path.exists()
+    uploaded_path.unlink()
+
+
 def test_dashboard_contains_magic_ux_signals():
     client = TestClient(app)
 
