@@ -114,7 +114,37 @@ class IsraelSearchEngine:
         title = cls.normalize_match_text(job.title or "")
         if not title:
             return False
+        if cls.is_economist_query(query):
+            return cls.has_economic_context(f"{job.title} {job.description}")
         return any(cls.keyword_matches_title(keyword, title) for keyword in query.keywords if keyword)
+
+    @classmethod
+    def is_economist_query(cls, query: SearchQuery) -> bool:
+        text = cls.normalize_match_text(" ".join(query.keywords))
+        return any(term in text for term in ["כלכל", "economist", "financial analyst", "finance analyst"])
+
+    @classmethod
+    def has_economic_context(cls, value: str) -> bool:
+        text = cls.normalize_match_text(value)
+        return any(
+            term in text
+            for term in [
+                "כלכל",
+                "פיננס",
+                "כספ",
+                "תקציב",
+                "תמחיר",
+                "תמחור",
+                "השקעות",
+                "אשראי",
+                "חשבונ",
+                "economist",
+                "financial",
+                "finance",
+                "budget",
+                "pricing",
+            ]
+        ) or any(phrase in text for phrase in ["אנליסט פיננס", "אנליסט כלכל", "בקרה תקציב", "בקרה פיננס"])
 
     @classmethod
     def keyword_matches_title(cls, keyword: str, title: str) -> bool:

@@ -1,6 +1,7 @@
 from dataclasses import fields
 
 from src.israel_sources.base import SearchQuery
+from src.israel_sources.drushim import DrushimAdapter
 from src.israel_sources.global_apis import ArbeitnowAdapter, GreenhouseAdapter, LeverAdapter, RemoteOkAdapter, RemotiveAdapter
 from src.israel_sources.models import IsraeliJob
 from src.israel_sources.registry import get_adapter, get_all_adapters
@@ -108,6 +109,100 @@ def test_search_engine_filters_unrelated_adapter_results():
         unrelated,
         SearchQuery(keywords=["Backend Developer"], locations=["Remote"], limit=10),
     ) is False
+
+
+def test_search_engine_accepts_economic_roles_for_economist_query():
+    budget_control = IsraeliJob(
+        source="test",
+        source_job_id="finance-1",
+        title="רפרנט/ית לתכנון פיננסי ובקרה תקציבית",
+        company="Finance Co",
+        location="Israel",
+        description="עבודה בצוות כספים, תקציב, בקרה ואנליזות",
+        apply_url="https://example.com/finance-1",
+        apply_email=None,
+        apply_method="external_url",
+        posted_at=None,
+    )
+    unrelated = IsraeliJob(
+        source="test",
+        source_job_id="driver-1",
+        title="נהג/ת עם רישיון רכב ציבורי",
+        company="Transport Co",
+        location="Israel",
+        description="הסעות ושירות לקוחות",
+        apply_url="https://example.com/driver-1",
+        apply_email=None,
+        apply_method="external_url",
+        posted_at=None,
+    )
+
+    filtered = IsraelSearchEngine.filter_jobs_by_query(
+        [budget_control, unrelated],
+        SearchQuery(keywords=["כלכלן"], locations=["Israel"], limit=10),
+    )
+
+    assert filtered == [budget_control]
+
+
+def test_drushim_economist_query_uses_finance_filters_and_no_broad_area():
+    adapter = DrushimAdapter()
+
+    url = adapter.build_search_url(
+        SearchQuery(keywords=["כלכלן"], locations=["Israel", "Tel Aviv", "Haifa"], limit=200),
+        page=3,
+    )
+
+    assert "api/jobs/search" in url
+    assert "searchterm=%D7%9B%D7%9C%D7%9B%D7%9C%D7%9F" in url
+    assert "catdir=9" in url
+    assert "subcat=100" in url
+    assert "page=3" in url
+    assert "area=" not in url
+
+
+def test_drushim_economist_parser_keeps_finance_jobs_and_drops_unrelated():
+    adapter = DrushimAdapter()
+    payload = """
+    {
+      "ResultList": [
+        {
+          "Code": 1,
+          "Company": {"CompanyDisplayName": "Finance Co"},
+          "SendCVButtonModel": {"ButtonLink": "https://www.drushim.co.il/sendcv.aspx?jobcode=1"},
+          "JobInfo": {"Link": "/job/1/abc/", "JobCode": 1},
+          "JobContent": {
+            "FullName": "רפרנט/ית לתכנון פיננסי ובקרה תקציבית",
+            "Description": "תפקיד בצוות כספים ובקרה",
+            "Requirements": "Excel וניתוח תקציב",
+            "SubCategories": [{"NameInHebrew": "כלכלן/ית"}],
+            "Categories": [{"NameInHebrew": "כספים / שוק ההון"}],
+            "Regions": [{"NameInHebrew": "תל אביב"}]
+          }
+        },
+        {
+          "Code": 2,
+          "Company": {"CompanyDisplayName": "Transport Co"},
+          "SendCVButtonModel": {"ButtonLink": "https://www.drushim.co.il/sendcv.aspx?jobcode=2"},
+          "JobInfo": {"Link": "/job/2/abc/", "JobCode": 2},
+          "JobContent": {
+            "FullName": "נהג/ת עם רישיון רכב ציבורי",
+            "Description": "הסעות ושירות לקוחות",
+            "Requirements": "רישיון נהיגה",
+            "SubCategories": [{"NameInHebrew": "תחבורה"}],
+            "Categories": [{"NameInHebrew": "כללי"}],
+            "Regions": [{"NameInHebrew": "חיפה"}]
+          }
+        }
+      ]
+    }
+    """
+
+    jobs = adapter.parse_jobs(payload, SearchQuery(keywords=["כלכלן"], locations=["Israel"], limit=200))
+
+    assert len(jobs) == 1
+    assert jobs[0].source_job_id == "1"
+    assert jobs[0].title == "רפרנט/ית לתכנון פיננסי ובקרה תקציבית"
 
 
 def test_parallel_search_filters_each_future_with_its_own_query():
