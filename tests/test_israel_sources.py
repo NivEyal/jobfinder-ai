@@ -111,41 +111,7 @@ def test_search_engine_filters_unrelated_adapter_results():
     ) is False
 
 
-def test_search_engine_accepts_economic_roles_for_economist_query():
-    budget_control = IsraeliJob(
-        source="test",
-        source_job_id="finance-1",
-        title="רפרנט/ית לתכנון פיננסי ובקרה תקציבית",
-        company="Finance Co",
-        location="Israel",
-        description="עבודה בצוות כספים, תקציב, בקרה ואנליזות",
-        apply_url="https://example.com/finance-1",
-        apply_email=None,
-        apply_method="external_url",
-        posted_at=None,
-    )
-    unrelated = IsraeliJob(
-        source="test",
-        source_job_id="driver-1",
-        title="נהג/ת עם רישיון רכב ציבורי",
-        company="Transport Co",
-        location="Israel",
-        description="הסעות ושירות לקוחות",
-        apply_url="https://example.com/driver-1",
-        apply_email=None,
-        apply_method="external_url",
-        posted_at=None,
-    )
-
-    filtered = IsraelSearchEngine.filter_jobs_by_query(
-        [budget_control, unrelated],
-        SearchQuery(keywords=["כלכלן"], locations=["Israel"], limit=10),
-    )
-
-    assert filtered == [budget_control]
-
-
-def test_drushim_economist_query_uses_finance_filters_and_no_broad_area():
+def test_drushim_query_uses_plain_search_term_and_no_broad_area():
     adapter = DrushimAdapter()
 
     url = adapter.build_search_url(
@@ -155,13 +121,13 @@ def test_drushim_economist_query_uses_finance_filters_and_no_broad_area():
 
     assert "api/jobs/search" in url
     assert "searchterm=%D7%9B%D7%9C%D7%9B%D7%9C%D7%9F" in url
-    assert "catdir=9" in url
-    assert "subcat=100" in url
+    assert "catdir=" not in url
+    assert "subcat=" not in url
     assert "page=3" in url
     assert "area=" not in url
 
 
-def test_drushim_economist_parser_keeps_finance_jobs_and_drops_unrelated():
+def test_drushim_parser_keeps_plain_result_list_jobs():
     adapter = DrushimAdapter()
     payload = """
     {
@@ -200,7 +166,7 @@ def test_drushim_economist_parser_keeps_finance_jobs_and_drops_unrelated():
 
     jobs = adapter.parse_jobs(payload, SearchQuery(keywords=["כלכלן"], locations=["Israel"], limit=200))
 
-    assert len(jobs) == 1
+    assert len(jobs) == 2
     assert jobs[0].source_job_id == "1"
     assert jobs[0].title == "רפרנט/ית לתכנון פיננסי ובקרה תקציבית"
 
@@ -243,6 +209,43 @@ def test_parallel_search_filters_each_future_with_its_own_query():
     )
 
     assert {job.title for job in jobs} == {"Alpha Developer", "Beta Analyst"}
+
+
+def test_search_engine_trusts_drushim_search_ranking_without_extra_title_filter():
+    class DrushimLikeAdapter:
+        source = "drushim"
+
+        def search(self, query):
+            return [
+                IsraeliJob(
+                    source=self.source,
+                    source_job_id="semantic-result",
+                    title="אנליסט פיננסי",
+                    company="Finance Co",
+                    location="Israel",
+                    description="Result ranked by Drushim for the requested query",
+                    apply_url="https://example.com/semantic-result",
+                    apply_email=None,
+                    apply_method="external_url",
+                    posted_at=None,
+                )
+            ]
+
+    engine = IsraelSearchEngine(sources=["remotive"])
+    engine.adapters = [DrushimLikeAdapter()]
+
+    jobs = engine.search_from_plan(
+        {
+            "total_limit": 10,
+            "jobs_per_source": 10,
+            "max_workers": 1,
+            "max_tasks": 1,
+            "queries": [{"keywords": ["כלכלן"], "locations": ["Israel"], "limit": 10}],
+        }
+    )
+
+    assert len(jobs) == 1
+    assert jobs[0].title == "אנליסט פיננסי"
 
 
 def test_comeet_adapter_extracts_israel_jobs_from_positions_data():

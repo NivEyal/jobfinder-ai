@@ -358,18 +358,16 @@ class DailyPipeline:
     def fetch_jobs(self, search_plan: Dict[str, Any], max_jobs: int | None = None) -> List[Any]:
         if max_jobs is not None:
             search_plan = dict(search_plan)
-            search_plan["total_limit"] = max_jobs
-            search_plan["jobs_per_source"] = min(search_plan.get("jobs_per_source", max_jobs), max_jobs)
-            search_plan["max_pages"] = min(search_plan.get("max_pages", 1), 1)
-            search_plan["max_workers"] = 12
-            search_plan["max_tasks"] = 36
-            priority_sources = ["remotive", "arbeitnow", "remoteok", "greenhouse", "lever"]
-            configured_sources = search_plan.get("sources", [])
-            search_plan["sources"] = [
-                source for source in priority_sources if source in configured_sources
-            ] + [source for source in configured_sources if source not in priority_sources]
+            target_jobs = max_jobs
+            search_plan["total_limit"] = target_jobs
+            search_plan["jobs_per_source"] = target_jobs
+            search_plan["max_pages"] = max(search_plan.get("max_pages", 1), 20)
+            search_plan["max_workers"] = 1
+            search_plan["max_tasks"] = len(search_plan.get("queries", []))
+            if "drushim" in search_plan.get("sources", []):
+                search_plan["sources"] = ["drushim"]
             search_plan["queries"] = [
-                {**query, "limit": min(query.get("limit", max_jobs), max_jobs)}
+                {**query, "limit": min(query.get("limit", search_plan["jobs_per_source"]), search_plan["jobs_per_source"])}
                 for query in search_plan.get("queries", [])
             ]
         engine = IsraelSearchEngine(

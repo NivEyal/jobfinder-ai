@@ -492,11 +492,13 @@ def debug_search(title: str, limit: int = 10) -> Dict[str, Any]:
     config["search"] = dict(config["search"])
     config["search"]["keywords"] = runtime_keywords
     search_plan = SearchPlanBuilder.build(config)
-    search_plan["total_limit"] = max(1, min(int(limit), 25))
-    search_plan["jobs_per_source"] = max(1, min(int(limit), 25))
-    search_plan["max_pages"] = 1
-    search_plan["max_workers"] = 8
-    search_plan["max_tasks"] = 80
+    search_plan["total_limit"] = max(1, min(int(limit), 200))
+    search_plan["jobs_per_source"] = max(1, min(int(limit), 200))
+    search_plan["max_pages"] = 20
+    search_plan["max_workers"] = 1
+    search_plan["max_tasks"] = len(search_plan.get("queries", []))
+    if "drushim" in search_plan.get("sources", []):
+        search_plan["sources"] = ["drushim"]
     search_plan["queries"] = [
         {**query, "limit": search_plan["jobs_per_source"]}
         for query in search_plan.get("queries", [])

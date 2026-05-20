@@ -83,7 +83,7 @@ class IsraelSearchEngine:
                     except Exception as exc:
                         self.emit_progress(search_plan, completed, total_steps, len(jobs), adapter.source, f"error: {exc}")
                         continue
-                    filtered_jobs = self.filter_jobs_by_query(query_jobs, query)
+                    filtered_jobs = query_jobs if adapter.source == "drushim" else self.filter_jobs_by_query(query_jobs, query)
                     self.emit_source_result(search_plan, adapter.source, query, len(query_jobs), len(filtered_jobs))
                     for job in filtered_jobs:
                         key = (job.source, job.source_job_id)
@@ -114,37 +114,7 @@ class IsraelSearchEngine:
         title = cls.normalize_match_text(job.title or "")
         if not title:
             return False
-        if cls.is_economist_query(query):
-            return cls.has_economic_context(f"{job.title} {job.description}")
         return any(cls.keyword_matches_title(keyword, title) for keyword in query.keywords if keyword)
-
-    @classmethod
-    def is_economist_query(cls, query: SearchQuery) -> bool:
-        text = cls.normalize_match_text(" ".join(query.keywords))
-        return any(term in text for term in ["כלכל", "economist", "financial analyst", "finance analyst"])
-
-    @classmethod
-    def has_economic_context(cls, value: str) -> bool:
-        text = cls.normalize_match_text(value)
-        return any(
-            term in text
-            for term in [
-                "כלכל",
-                "פיננס",
-                "כספ",
-                "תקציב",
-                "תמחיר",
-                "תמחור",
-                "השקעות",
-                "אשראי",
-                "חשבונ",
-                "economist",
-                "financial",
-                "finance",
-                "budget",
-                "pricing",
-            ]
-        ) or any(phrase in text for phrase in ["אנליסט פיננס", "אנליסט כלכל", "בקרה תקציב", "בקרה פיננס"])
 
     @classmethod
     def keyword_matches_title(cls, keyword: str, title: str) -> bool:
@@ -200,7 +170,8 @@ class IsraelSearchEngine:
                 except Exception as exc:
                     self.emit_progress(search_plan, step, total_steps, len(jobs), adapter.source, f"error: {exc}")
                     continue
-                for job in self.filter_jobs_by_query(query_jobs, query):
+                filtered_jobs = query_jobs if adapter.source == "drushim" else self.filter_jobs_by_query(query_jobs, query)
+                for job in filtered_jobs:
                     key = (job.source, job.source_job_id)
                     if key in seen:
                         continue

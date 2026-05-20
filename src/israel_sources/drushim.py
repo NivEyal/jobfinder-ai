@@ -12,20 +12,15 @@ from src.israel_sources.models import IsraeliJob
 class DrushimAdapter(JsonLdJobAdapter):
     source = "drushim"
     base_url = "https://www.drushim.co.il"
-    finance_category = 9
-    economist_subcategory = 100
 
     def build_search_url(self, query: SearchQuery, page: int = 1) -> str:
         params = {
-            "searchterm": self.search_term(query),
+            "searchterm": query.keyword_text,
             "isAA": "true",
             "page": page,
             "range": 3,
         }
-        if self.is_economist_query(query):
-            params["catdir"] = self.finance_category
-            params["subcat"] = self.economist_subcategory
-        elif query.location_text and len(query.locations) <= 2:
+        if query.location_text and len(query.locations) <= 2:
             params["area"] = query.location_text
         return self.make_url(
             "api/jobs/search",
@@ -35,9 +30,6 @@ class DrushimAdapter(JsonLdJobAdapter):
     max_pages = 12
 
     def search(self, query: SearchQuery) -> List[IsraeliJob]:
-        if not self.is_economist_query(query):
-            return super().search(query)
-
         jobs: List[IsraeliJob] = []
         seen: set = set()
         page_count = min(30, max(self.max_pages, ceil(max(query.limit, 1) / 10) + 6))
@@ -65,10 +57,6 @@ class DrushimAdapter(JsonLdJobAdapter):
                         return jobs
         return jobs
 
-    @classmethod
-    def search_term(cls, query: SearchQuery) -> str:
-        return "כלכלן" if cls.is_economist_query(query) else query.keyword_text
-
     @staticmethod
     def is_economist_query(query: SearchQuery) -> bool:
         text = " ".join(query.keywords).lower()
@@ -90,8 +78,6 @@ class DrushimAdapter(JsonLdJobAdapter):
 
                 title = str(job_content.get("FullName") or job_content.get("Name") or "")
                 if not title:
-                    continue
-                if self.is_economist_query(query) and not self.is_economic_job(title, job_content):
                     continue
 
                 source_job_id = str(item.get("Code") or job_content.get("JobCode") or job_info.get("JobCode") or "")
@@ -121,38 +107,6 @@ class DrushimAdapter(JsonLdJobAdapter):
             except Exception:
                 continue
         return jobs
-
-    @classmethod
-    def is_economic_job(cls, title: str, job_content: Dict[str, Any]) -> bool:
-        text_parts = [title, job_content.get("Description", ""), job_content.get("Requirements", "")]
-        taxonomy_parts = []
-        for group in ["SubCategories", "Categories"]:
-            for item in job_content.get(group) or []:
-                taxonomy_parts.append(str(item.get("NameInHebrew") or ""))
-        taxonomy_text = " ".join(taxonomy_parts).lower()
-        if "כלכל" in taxonomy_text or "כספים" in taxonomy_text or "שוק ההון" in taxonomy_text:
-            return True
-        text_parts.extend(taxonomy_parts)
-        text = " ".join(text_parts).lower()
-        return any(
-            term in text
-            for term in [
-                "כלכל",
-                "פיננס",
-                "כספ",
-                "תקציב",
-                "תמחיר",
-                "תמחור",
-                "השקעות",
-                "אשראי",
-                "חשבונ",
-                "economist",
-                "financial",
-                "finance",
-                "budget",
-                "pricing",
-            ]
-        ) or any(phrase in text for phrase in ["אנליסט פיננס", "אנליסט כלכל", "בקרה תקציב", "בקרה פיננס"])
 
     @staticmethod
     def _location(job_content: Dict[str, Any]) -> str:
